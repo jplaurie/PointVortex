@@ -1,0 +1,28 @@
+Np = 1 Number of positive vortices
+Nm = 1 Number of negative vortices
+N =  2 Total number of vortices
+Lx = 6.28318530718
+Ly = 6.28318530718
+L = 4.44288293816 Mean intervortex spacing 
+=========== time stepping =========
+dtMax = 0.05
+rkTolerance = 1e-06
+totalSteps =  10000000
+=========== boundary =========
+FLAG_BOUNDARY = periodic
+=========== output =========
+FLAG_OUTPUT = 1
+OutputTime = 0.1
+=========== initial condition =========
+FLAG_INITIAL_CONDITION = random
+=========== backgorund flow ===========
+FLAG_BACKGROUND_FLOW = none
+backgroundFlowStrength =  0.001
+=========== add / remove ===========
+FLAG_VORTEX_REMOVE = 0
+removalDistanceLower = 0.626657068658
+removalDistanceUpper = 501.325654926
+probabilityRemoval = 1
+FLAG_VORTEX_ADD = 0
+============parallelism============
+number of threads = 1
