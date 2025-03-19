@@ -19,8 +19,8 @@ void computeMomentum(mat A_xy, rowvec A_G, double & momentumxValue, double & mom
 	momentumangularValue = 0.0;
 	//compute the linear momentum
 	for(int i =0 ; i < N; i++){
-		momentumxValue += A_G(i) * A_xy(i,0);
-		momentumyValue += A_G(i) * A_xy(i,1);
+		momentumxValue += A_G(i) * (A_xy(i,0) - 0.5*Lx);
+		momentumyValue += A_G(i) * (A_xy(i,1) - 0.5*Ly);
 		momentumangularValue += A_G(i) * ( pow(A_xy(i,0),2.0) + pow(A_xy(i,1),2.0) );
 	}
 
@@ -58,6 +58,18 @@ else if(FLAG_BOUNDARY == "periodic-x"){
 		}
 		
 	}
+	if(FLAG_BACKGROUND_FLOW == "sinh"){
+		for(int j =0 ; j < N; j++){
+			hamiltonianValue += A_G(j)*backgroundFlowStrength*cosh(A_xy(j,1)-0.5*Ly);
+		}
+	}
+	else if(FLAG_BACKGROUND_FLOW == "shear"){
+		for(int j =0 ; j < N; j++){
+			hamiltonianValue += A_G(j)*backgroundFlowStrength*0.5*pow(A_xy(j,1)-0.5*Ly,2.0);
+		}
+	}
+
+
 }
 else if(FLAG_BOUNDARY == "periodic"){
 
@@ -116,29 +128,6 @@ else{
 	cout << "error in computeHamiltonian" << endl;
 	exit(1);
 }
-
-
-if(FLAG_BACKGROUND_FLOW == "sinh"){
-	for(int j =0 ; j < N; j++){
-		hamiltonianValue += A_G(j)*backgroundFlowStrength*cosh(A_xy(j,1));
-	}
-}
-else if(FLAG_BACKGROUND_FLOW == "shear"){
-	for(int j =0 ; j < N; j++){
-		hamiltonianValue += A_G(j)*backgroundFlowStrength*0.5*pow(A_xy(j,1),2.0);
-	}
-}
-else if(FLAG_BACKGROUND_FLOW == "tent-shear"){
-	for(int j =0 ; j < N; j++){
-		if(A_xy(j,1) < 0){
-           	hamiltonianValue += A_G(j)*backgroundFlowStrength*0.5*pow(A_xy(j,1)+0.25*Ly,2.0);
-		}
-		else{
-			hamiltonianValue -= A_G(j)*backgroundFlowStrength*0.5*pow(A_xy(j,1)-0.25*Ly,2.0);
-		}
-    }
-}
-
 
 return;
 }

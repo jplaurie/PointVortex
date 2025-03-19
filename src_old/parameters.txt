@@ -1,28 +1,28 @@
-Np = 1 Number of positive vortices
-Nm = 1 Number of negative vortices
-N =  2 Total number of vortices
+Np = 150 Number of positive vortices
+Nm = 50 Number of negative vortices
+N =  200 Total number of vortices
 Lx = 6.28318530718
 Ly = 6.28318530718
-L = 4.44288293816 Mean intervortex spacing 
+L = 0.444288293816 Mean intervortex spacing 
 =========== time stepping =========
-dtMax = 0.01
+dtMax = 0.05
 rkTolerance = 1e-06
 totalSteps =  10000000
 =========== boundary =========
-FLAG_BOUNDARY = infinite
+FLAG_BOUNDARY = disc
 =========== output =========
 FLAG_OUTPUT = 1
-OutputTime = 1
+OutputTime = 0.1
 =========== initial condition =========
 FLAG_INITIAL_CONDITION = random
 =========== backgorund flow ===========
-FLAG_BACKGROUND_FLOW = tent-shear
-backgroundFlowStrength =  0.01
+FLAG_BACKGROUND_FLOW = none
+backgroundFlowStrength =  0.001
 =========== add / remove ===========
-FLAG_VORTEX_REMOVE = 0
-removalDistanceLower = 0.626657068658
-removalDistanceUpper = 501.325654926
+FLAG_VORTEX_REMOVE = 1
+removalDistanceLower = 0.0626657068658
+removalDistanceUpper = 50.1325654926
 probabilityRemoval = 1
-FLAG_VORTEX_ADD = 0
+FLAG_VORTEX_ADD = 1
 ============parallelism============
 number of threads = 1

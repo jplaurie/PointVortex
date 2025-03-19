@@ -15,7 +15,7 @@ OBJS = main.o step.o initialize.o output.o hamiltonian.o remove.o
 
 
 #This is for mac osx
-CC = g++-mp-10 -O2 -std=c++14 -fopenmp
+CC = g++-mp-12 -O3 -std=c++14 -fopenmp
 DEBUG = 
 CFLAGS = -c $(DEBUG) -I/opt/local/include
 LFLAGS = $(DEBUG) -L/opt/local/lib -lm -lpthread -larmadillo
@@ -27,21 +27,21 @@ point: $(OBJS)
 main.o: main.cpp Const.h
 	$(CC) $(CFLAGS) main.cpp
 
-step.o: step.cpp Const.h
+step.o: step.cpp # Const.h
 	$(CC) $(CFLAGS) step.cpp
 
-initialize.o: initialize.cpp Const.h
+initialize.o: initialize.cpp #Const.h
 	$(CC) $(CFLAGS) initialize.cpp
 
-output.o: output.cpp Const.h
+output.o: output.cpp #Const.h
 	$(CC) $(CFLAGS) output.cpp
 
-hamiltonian.o: hamiltonian.cpp Const.h
+hamiltonian.o: hamiltonian.cpp #Const.h
 	$(CC) $(CFLAGS) hamiltonian.cpp 
 
 remove.o: remove.cpp Const.h
 	$(CC) $(CFLAGS) remove.cpp
 
 clean:
-	rm -rfv *.o ./Output/ *~ point
+	rm -rfv *.o ./output/ *~ point
 

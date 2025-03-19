@@ -1,7 +1,7 @@
 
 //============== Model Parameters ==============
-const int Np = 1;      //Number of positive vortices
-const int Nm = 1;		//Number of negative vortices
+const int Np = 150;      //Number of positive vortices
+const int Nm = 50;		//Number of negative vortices
 const int N = Np+Nm;    //Compute the total number of vortices
 
 const int imageTotal = 5;  //Number of periodic images used in full periodic model (5 seem to be sufficient)
@@ -13,7 +13,7 @@ const double Ly = 2.0*pi;
 const double R = 1.0;            //System radius of disc domain
 
 //============== Time Stepping Parameters ==============
-const double dtMax = 0.01;                  //Maximum timestep to be used in adaptive timestepping scheme 
+const double dtMax = 0.05;                  //Maximum timestep to be used in adaptive timestepping scheme 
 const double rkTolerance = 1.e-6;  //Maximum tolerance allowed between the 4th and 5th order Runge-Kutta solutions
 const int totalSteps = 10000000;//1.e9;            //Total number of time steps
 
@@ -23,11 +23,11 @@ const int totalSteps = 10000000;//1.e9;            //Total number of time steps
 // "periodic-x" = periodic in x only, open in y. adapted from Aref JFM 1995
 // "infinite" = open boundary conditions
 // "disc" = free slip disc of size R
-const std::string FLAG_BOUNDARY = "infinite";   
+const std::string FLAG_BOUNDARY = "disc";   
 
 //============== Output Diagonostics and State ==============
 const bool FLAG_OUTPUT = true;
-const double outputTime = 1.0;      //runTime at which diagonistics and state are outputted to file
+const double outputTime = 0.1;      //runTime at which diagonistics and state are outputted to file
 const bool FLAG_STRUCTURE = false;  //Turn on/off the computation of structure functions of state
 const int NBIN = 256;
 
@@ -42,11 +42,10 @@ const std::string FLAG_INITIAL_CONDITION = "random";
 //============== Background Flow ==============
 
 // "shear"  = shear flow v=[A*(y - Ly/2),0]
-// "periodic-shear" = periodic shear flow
 // "sinh"  = sinh flow v=[A(sinh(y-Ly/2)), 0]
 // "none" = no additional background flow
-const std::string FLAG_BACKGROUND_FLOW = "periodic-shear";
-const double backgroundFlowStrength = 0.01; //Background flow amplitude
+const std::string FLAG_BACKGROUND_FLOW = "none";
+const double backgroundFlowStrength = 0.001; //Background flow amplitude
 
 ////============== Random Noise ==============
 // "gaussian" = random white noise
@@ -55,7 +54,7 @@ const std::string FLAG_NOISE = "none";
 const double noiseStrength = 0.001; //Noise amplitude
 
 //============== Routines for Vortex Removal ==============
-const bool FLAG_VORTEX_REMOVE = false; //Turn off/on vortex removal at each time step
+const bool FLAG_VORTEX_REMOVE = true; //Turn off/on vortex removal at each time step
 const double L = sqrt( Lx * Ly / double(N) ) ;	//compute the mean intervortex distance for periodic box
 const double Lr = sqrt( pi * R * R / double(N)); //compute the mean intervortex distance for disc
 const double removalDistanceLower = 0.5*Lr;		//Remove opposite signed vortices if nearest neighbour is closer than this distance
@@ -63,7 +62,7 @@ const double removalDistanceUpper = 400.0*Lr;		//Remove opposite signed vortices
 const double probabilityRemoval = 1.0;			//Probability used in candidate of removal of vortex dipole
 
 
-const bool FLAG_VORTEX_ADD = false; //Turn on/off reinjecting dipole vortices if removed. Added in randomly at distance L
+const bool FLAG_VORTEX_ADD = true; //Turn on/off reinjecting dipole vortices if removed. Added in randomly at distance L
 
 const bool FLAG_RECORD_ENERGY = false; //Turn on/off computation of Hamiltonian difference from add/remove vortices
 

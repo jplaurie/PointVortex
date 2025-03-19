@@ -165,23 +165,13 @@ mat computeVelocity(mat A_xy, rowvec A_G){
 	if(FLAG_BACKGROUND_FLOW == "shear"){
 			for(int i = 0; i < N; i++){
 				// shear flow v = [A*y,0]
-				dv(i,0) +=  backgroundFlowStrength * (A_xy(i,1));
+				dv(i,0) +=  backgroundFlowStrength * (A_xy(i,1) - 0.5*Ly);
 			}
 	}
-	else if(FLAG_BACKGROUND_FLOW == "periodic-shear"){
-		for(int i = 0; i < N; i++){
-	    		if(A_xy(i,1) < 0){        
-				dv(i,0) +=  backgroundFlowStrength * (A_xy(i,1) + 0.25*Ly);
-            }
-			else{
-				dv(i,0) -=  backgroundFlowStrength * (A_xy(i,1) - 0.25*Ly);
-			}
-		}
-	}
-	else if(FLAG_BACKGROUND_FLOW == "sinh"){
+	if(FLAG_BACKGROUND_FLOW == "sinh"){
 			for(int i = 0; i < N; i++){
 				// sinh flow v = [A*sinh(y),0]
-				dv(i,0) +=  backgroundFlowStrength * sinh(A_xy(i,1));
+				dv(i,0) +=  backgroundFlowStrength * sinh(A_xy(i,1) - 0.5*Ly);
 			}
 	}
 
@@ -196,27 +186,27 @@ void invokeBoundaryCondtions(mat & A_xy){
 
 	if(FLAG_BOUNDARY == "periodic-x"){
 		for(int i =0 ; i< N; i++){
-			if(A_xy(i,0) < -Lx/2.0){
+			if(A_xy(i,0) < 0){
 				A_xy(i,0) += Lx;
 			}
-			else if(A_xy(i,0) >= Lx/2.0){
+			else if(A_xy(i,0) >= Lx){
 				A_xy(i,0) -= Lx;
 			}
 		}
 	}
 	else if(FLAG_BOUNDARY == "periodic"){
 		for(int i =0 ; i< N; i++){
-			if(A_xy(i,0) < -Lx/2.0){
+			if(A_xy(i,0) < 0){
 				A_xy(i,0) += Lx;
 			}
-			else if(A_xy(i,0) >= Lx/2.0){
+			else if(A_xy(i,0) >= Lx){
 				A_xy(i,0) -= Lx;
 			}
 		
-			if(A_xy(i,1) < -Ly/2.0){
+			if(A_xy(i,1) < 0){
 				A_xy(i,1) += Ly;
 			}
-			else if(A_xy(i,1) >= Ly/2.0){
+			else if(A_xy(i,1) >= Ly){
 				A_xy(i,1) -= Ly;
 			}
 		}
