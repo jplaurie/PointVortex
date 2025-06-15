@@ -1,12 +1,7 @@
-num_vortices = 100
 
-
-core_size = 1e-5
-num_threads = 0
-
-
-dt = 0.01
-out_time = 
-num_steps = 1000
-
-boundary_condition = periodic
+N 100
+timeStep 0.01
+numStep 1000
+coreSize 1e-5
+numThreads 0
+boundaryCondition periodic

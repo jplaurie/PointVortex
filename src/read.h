@@ -1,1 +1,3 @@
-std::map<std::string, std::string> loadParams(const std::string& filename);
+SimParams loadParams(const std::string& ) ;
+
+void initializeVortices(std::vector<Vortex> );
