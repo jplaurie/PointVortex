@@ -19,7 +19,7 @@ void printVortex(std::vector<Vortex> vortex, double runTime, int fileNumber){
     	fout_vortex.precision(12);
  		fout_vortex << scientific;
     	for(int i =0; i < N; i++){
-		   fout_vortex << vortex[i].x << " " << vortex[i].y << " " << vortex[i].gamma << " " << vortex[i].u << " " << vortex[i].v << endl;
+		   fout_vortex << vortex[i].x << " " << vortex[i].y << " " << vortex[i].circ << " " << vortex[i].u << " " << vortex[i].v << endl;
    		}
      
      	fout_vortex.close();

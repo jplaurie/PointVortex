@@ -27,6 +27,7 @@ int main() {
     //  Load Parameters 
     auto params = loadParams("params.txt");
 
+    double dt = params.timeStep;
 
     std::cout << "Loaded " << params.N << " vortices.\n";
     // Now use these parameters in your simulation
@@ -47,7 +48,7 @@ int main() {
     std::vector<Vortex> vortices(params.N);
 
     // Initialize vortices in a circle with alternating signs
-    initializeVortices(vortices);
+    initializeVortices(vortices, params);
     /*for (int i = 0; i < N; ++i) {
         double angle = 2 * PI * i / N;
         vortices[i].x = cos(angle);
@@ -73,7 +74,7 @@ int main() {
                 double dy = vortices[i].y - vortices[j].y;
                 double r2 = dx * dx + dy * dy + params.coreSize;
 
-                double coeff = vortices[j].gamma / (2 * params.PI * r2);
+                double coeff = vortices[j].circ / (2 * params.PI * r2);
 
                 vortices[i].u+= coeff * (-dy);
                 vortices[i].v += coeff * dx;
@@ -87,8 +88,23 @@ int main() {
             vortices[i].y += dt * vortices[i].v;
         }
 
-        // Optional: print status
-        if (step % 100 == 0) {
+       if( int(runTime / outputTime) == fileNumber + 1){
+
+            fileNumber++;
+            printVortex(vortices, runTime, fileNumber);
+
+            computeMomentum(vortices momentumxValue, momentumyValue, momentumangularValue);
+
+            computeHamiltonian(vortices hamiltonianValue);
+
+            printDiagnostics(hamiltonianValue, momentumxValue, momentumyValue, momentumangularValue, runTime,fileNumber);
+
+            if(FLAG_RECORD_ENERGY == true){
+                printRemoval(runTime,fileNumber,removeLowerCounter,removeUpperCounter, energyLowerRemoval, energyUpperRemoval,energyInjection);
+            }
+        
+            std::cout << "file = " << fileNumber << " time = " << runTime << " dt = " << dt << " Ham = " << hamiltonianValue << " MomX = " << momentumxValue << " MomY = " << momentumyValue << " MomAngular = " << momentumangularValue << endl;
+
             std::cout << "Step " << step << " completed\n";
         }
     }

@@ -1,9 +1,9 @@
 
 std::vector<std::pair<double, double>> computeVelocities(
-    const std::vector<Vortex>& vortices, double coreSize = 1e-5) {
+    const std::vector<Vortex>& vortices, SimParams params) {
     
-    int N = vortices.size();
-    std::vector<std::pair<double, double>> velocity(N, {0.0, 0.0});
+    
+    std::vector<std::pair<double, double>> velocity(params.N, {0.0, 0.0});
     
     #pragma omp parallel for
     for (int i = 0; i < N; ++i) {
@@ -15,7 +15,7 @@ std::vector<std::pair<double, double>> computeVelocities(
             double dy = vortices[i].y - vortices[j].y;
             double r2 = dx * dx + dy * dy + coreSize;
 
-            double coeff = vortices[j].gamma / (2 * M_PI * r2);
+            double coeff = vortices[j].circ / (2.0 * std::numbers::pi * r2);
             vx += coeff * (-dy);
             vy += coeff * dx;
         }
@@ -29,8 +29,38 @@ std::vector<std::pair<double, double>> computeVelocities(
 
 
 bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
-    const int N = vortices.size();
-    const double safety = 0.9, min_dt = 1e-10, max_dt = 1.0;
+ 
+    const double SAFETY = 0.9;
+    const double MIN_SCALE = 0.2;
+    const double MAX_SCALE = 5.0;
+
+    // Coefficients for DOPRI5 (Dormand-Prince)
+    const double c[] = {0, 1.0/5, 3.0/10, 4.0/5, 8.0/9, 1, 1};
+    const double a[][7] = {
+        {},
+        {1.0/5},
+        {3.0/40, 9.0/40},
+        {44.0/45, -56.0/15, 32.0/9},
+        {19372.0/6561, -25360.0/2187, 64448.0/6561, -212.0/729},
+        {9017.0/3168, -355.0/33, 46732.0/5247, 49.0/176, -5103.0/18656},
+        {35.0/384, 0, 500.0/1113, 125.0/192, -2187.0/6784, 11.0/84}
+    };
+
+    const double b[] = {35.0/384, 0, 500.0/1113, 125.0/192, -2187.0/6784, 11.0/84, 0};
+    const double bAlt[] = {5179.0/57600, 0, 7571.0/16695, 393.0/640, -92097.0/339200, 187.0/2100, 1.0/40};
+
+
+
+    for (int i = 1; i < 7; ++i) {
+            State yi = y;
+            for (int j = 0; j < i; ++j)
+                for (size_t m = 0; m < y.size(); ++m)
+                    yi[m] += h * a[i][j] * k[j][m];
+            f(t + c[i]*h, yi, k[i]);
+        }
+
+
+
 
     std::vector<Vortex> y0 = vortices;
 
@@ -38,56 +68,69 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
         return computeVelocities(state);
     };
 
-    auto k1 = computeVelocities(y0);
+    auto k1 = computeVelocities(y0,params);
 
     std::vector<Vortex> yk2 = y0;
     for (int i = 0; i < N; ++i) {
-        yk2[i].x += dt * 0.25 * k1[i].first;
-        yk2[i].y += dt * 0.25 * k1[i].second;
+        yk2[i].x += dt * 0.2 * k1[i].first;
+        yk2[i].y += dt * 0.2 * k1[i].second;
     }
+
+
+      for (int i = 0; i < N; ++i) {
+        for (int j =1; j < i; ++j){
+            yk2[i].x += dt * a[1][0] * k1[i].first;
+            yk2[i].y += dt * a[1][0] * k1[i].second;
+    }
+    
+    
     auto k2 = computeVelocities(yk2);
 
     std::vector<Vortex> yk3 = y0;
     for (int i = 0; i < N; ++i) {
-        yk3[i].x += dt * (3.0/32.0 * k1[i].first + 9.0/32.0 * k2[i].first);
-        yk3[i].y += dt * (3.0/32.0 * k1[i].second + 9.0/32.0 * k2[i].second);
+        yk3[i].x += dt * (a[2][0] * k1[i].first + a[2][1] * k2[i].first);
+        yk3[i].y += dt * (a[2][0] * k1[i].second + a[2][1]* k2[i].second);
     }
     auto k3 = computeVelocities(yk3);
 
     std::vector<Vortex> yk4 = y0;
-    for (int i = 0; i < N; ++i) {
-        yk4[i].x += dt * (1932.0/2197.0 * k1[i].first - 7200.0/2197.0 * k2[i].first + 7296.0/2197.0 * k3[i].first);
-        yk4[i].y += dt * (1932.0/2197.0 * k1[i].second - 7200.0/2197.0 * k2[i].second + 7296.0/2197.0 * k3[i].second);
+    for (int i = 0; i < N.params; ++i) {
+        yk4[i].x += dt * (a[3][0] * k1[i].first + a[3][1] * k2[i].first + a[3][2]* k3[i].first);
+        yk4[i].y += dt * (a[3][0] * k1[i].second + a[3][1] * k2[i].second + a[3][2] * k3[i].second);
     }
     auto k4 = computeVelocities(yk4);
 
     std::vector<Vortex> yk5 = y0;
     for (int i = 0; i < N; ++i) {
-        yk5[i].x += dt * (439.0/216.0 * k1[i].first - 8.0 * k2[i].first + 3680.0/513.0 * k3[i].first - 845.0/4104.0 * k4[i].first);
-        yk5[i].y += dt * (439.0/216.0 * k1[i].second - 8.0 * k2[i].second + 3680.0/513.0 * k3[i].second - 845.0/4104.0 * k4[i].second);
+        yk5[i].x += dt * (a[4][0]* k1[i].first + a[4][1] * k2[i].first + a[4][2] * k3[i].first + a[4][3] * k4[i].first);
+        yk5[i].y += dt * (a[4][0]* k1[i].second + a[4][1] * k2[i].second + a[4][2] * k3[i].second + a[4][3] * k4[i].second);
     }
     auto k5 = computeVelocities(yk5);
 
     std::vector<Vortex> yk6 = y0;
     for (int i = 0; i < N; ++i) {
-        yk6[i].x += dt * (-8.0/27.0 * k1[i].first + 2.0 * k2[i].first - 3544.0/2565.0 * k3[i].first
-                        + 1859.0/4104.0 * k4[i].first - 11.0/40.0 * k5[i].first);
-        yk6[i].y += dt * (-8.0/27.0 * k1[i].second + 2.0 * k2[i].second - 3544.0/2565.0 * k3[i].second
-                        + 1859.0/4104.0 * k4[i].second - 11.0/40.0 * k5[i].second);
-    }
+        yk6[i].x += dt * (a[5][0] * k1[i].first + a[5][1] * k2[i].first  + a[5][2] * k3[i].first + a[5][3] * k4[i].first + a[5][4] * k5[i].first);
+        yk6[i].y += dt * (a[5][0] * k1[i].second + a[5][1] * k2[i].second  + a[5][2] * k3[i].second + a[5][3] * k4[i].second + a[5][4] * k5[i].second);
     auto k6 = computeVelocities(yk6);
+
+
+    std::vector<Vortex> yk7 = y0;
+    for (int i = 0; i < N; ++i) {
+        yk7[i].x += dt * (a[6][0] * k1[i].first + a[6][1]* k2[i].first + a[6][2]* k3[i].first + a[6][3] * k4[i].first +a[6][4] * k5[i].first + a[6][5] * K6[i].first);
+        yk7[i].y += dt * (a[6][0] * k1[i].second + a[6][1]* k2[i].second + a[6][2]* k3[i].second + a[6][3] * k4[i].second +a[6][4] * k5[i].second + a[6][5] * K6[i].second);
+    auto k7 = computeVelocities(yk6);
+
+
 
     // Estimate next state and error
     double maxError = 0.0;
 
     for (int i = 0; i < N; ++i) {
-        double dx4 = dt * (25.0/216.0 * k1[i].first + 1408.0/2565.0 * k3[i].first + 2197.0/4104.0 * k4[i].first - 0.2 * k5[i].first);
-        double dy4 = dt * (25.0/216.0 * k1[i].second + 1408.0/2565.0 * k3[i].second + 2197.0/4104.0 * k4[i].second - 0.2 * k5[i].second);
+        double dx4 = dt * (bAlt[0] * k1[i].first +  bAlt[1] * k2[i].first + bAlt[2] * k3[i].first +  bAlt[3] * k4[i].first + bAlt[4] * k5[i].first);
+        double dy4 = dt * (bAlt[0] * k1[i].second  +  bAlt[1] * k2[i].second + bAlt[2] * k3[i].second + bAlt[3] * k4[i].second + bAlt[4] * k5[i].second);
 
-        double dx5 = dt * (16.0/135.0 * k1[i].first + 6656.0/12825.0 * k3[i].first + 28561.0/56430.0 * k4[i].first
-                         - 9.0/50.0 * k5[i].first + 2.0/55.0 * k6[i].first);
-        double dy5 = dt * (16.0/135.0 * k1[i].second + 6656.0/12825.0 * k3[i].second + 28561.0/56430.0 * k4[i].second
-                         - 9.0/50.0 * k5[i].second + 2.0/55.0 * k6[i].second);
+        double dx5 = dt * (b[0] * k1[i].first + b[1] * k2[i].first+ b[2] * k3[i].first + b[3] * k4[i].first + b[4] * k5[i].first + b[5] * k6[i].first);
+        double dy5 = dt * (b[0] * k1[i].second + b[1] * k2[i].second + b[2] * k3[i].second + b[3] * k4[i].second + b[4] * k5[i].second + b[5] * k6[i].second);
 
         double err = std::hypot(dx5 - dx4, dy5 - dy4);
         maxError = std::max(maxError, err);
@@ -97,10 +140,10 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
     if (maxError < tol) {
         // Accept step
         for (int i = 0; i < N; ++i) {
-            vortices[i].x += dt * (16.0/135.0 * k1[i].first + 6656.0/12825.0 * k3[i].first
-                                 + 28561.0/56430.0 * k4[i].first - 9.0/50.0 * k5[i].first + 2.0/55.0 * k6[i].first);
-            vortices[i].y += dt * (16.0/135.0 * k1[i].second + 6656.0/12825.0 * k3[i].second
-                                 + 28561.0/56430.0 * k4[i].second - 9.0/50.0 * k5[i].second + 2.0/55.0 * k6[i].second);
+            vortices[i].u += (b[0] * k1[i].first + b[1] * k2[i].first+ b[2] * k3[i].first + b[3] * k4[i].first + b[4] * k5[i].first + b[5] * k6[i].first);
+            vortices[i].v += (b[0] * k1[i].second + b[1] * k2[i].second + b[2] * k3[i].second + b[3] * k4[i].second + b[4] * k5[i].second + b[5] * k6[i].second);
+            vortices[i].x += dt * vortices[i].u;
+            vortices[i].y += dt * vortices[i].v;
         }
 
         // Adjust dt
@@ -112,3 +155,34 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
         return false;
     }
 }
+
+
+
+
+
+
+
+
+ // Compute velocities using OpenMP
+        #pragma omp parallel for
+        for (int i = 0; i < params.N; ++i) {
+            for (int j = 0; j < params.N; ++j) {
+                if (i == j) continue;
+
+                double dx = vortices[i].x - vortices[j].x;
+                double dy = vortices[i].y - vortices[j].y;
+                double r2 = dx * dx + dy * dy + params.coreSize;
+
+                double coeff = vortices[j].circ / (2 * params.PI * r2);
+
+                vortices[i].u+= coeff * (-dy);
+                vortices[i].v += coeff * dx;
+            }
+            
+        }
+
+        // Update positions
+        for (int i = 0; i < params.N; ++i) {
+            vortices[i].x += dt * vortices[i].u;
+            vortices[i].y += dt * vortices[i].v;
+        }

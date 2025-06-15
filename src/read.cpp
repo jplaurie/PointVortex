@@ -3,6 +3,7 @@
 #include <sstream>
 #include <string>
 #include <map>
+#include <cmath>
 #include <vector>
 #include "params.h"
 #include "vortex.h"
@@ -28,13 +29,13 @@ std::map<std::string, std::string> loadParams(const std::string& filename) {
 }
 */
 
-void initializeVortices(std::vector<Vortex> vortices, SimParams params){
+void initializeVortices(std::vector<Vortex>& vortices, SimParams params){
 
 for (int i = 0; i < params.N; ++i) {
-    double angle = 2 * PI * i / params.N;
+    double angle = 2 * params.PI * i / params.N;
     vortices[i].x = cos(angle);
     vortices[i].y = sin(angle);
-    vortices[i].gamma = (i % 2 == 0) ? 1.0 : -1.0;
+    vortices[i].circ = (i % 2 == 0) ? 1.0 : -1.0;
 }
 
 return;

@@ -1,5 +1,5 @@
 struct Vortex {
     double x, y;
-    double gamma;
-    double u,v;
+    double circ;
+    double u, v;
 };
