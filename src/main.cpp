@@ -2,6 +2,7 @@
 #include <vector>
 #include <cmath>
 #include <omp.h>
+#include <numbers>
 
 #include <fstream>
 #include <sstream>
@@ -62,31 +63,15 @@ int main() {
     //  Timestep Loop
     for (int step = 0; step < params.numSteps; ++step) {
         
+
+         // main time stepping
+        vortices = rungeKutta45(vortices, dt);
+  
+        runTime += dt;  //Add dt to runTime
+
         
         
-        // Compute velocities using OpenMP
-        #pragma omp parallel for
-        for (int i = 0; i < params.N; ++i) {
-            for (int j = 0; j < params.N; ++j) {
-                if (i == j) continue;
-
-                double dx = vortices[i].x - vortices[j].x;
-                double dy = vortices[i].y - vortices[j].y;
-                double r2 = dx * dx + dy * dy + params.coreSize;
-
-                double coeff = vortices[j].circ / (2 * params.PI * r2);
-
-                vortices[i].u+= coeff * (-dy);
-                vortices[i].v += coeff * dx;
-            }
-            
-        }
-
-        // Update positions
-        for (int i = 0; i < params.N; ++i) {
-            vortices[i].x += dt * vortices[i].u;
-            vortices[i].y += dt * vortices[i].v;
-        }
+       
 
        if( int(runTime / outputTime) == fileNumber + 1){
 
