@@ -71,16 +71,11 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
     auto k1 = computeVelocities(y0,params);
 
     std::vector<Vortex> yk2 = y0;
+
+
     for (int i = 0; i < N; ++i) {
-        yk2[i].x += dt * 0.2 * k1[i].first;
-        yk2[i].y += dt * 0.2 * k1[i].second;
-    }
-
-
-      for (int i = 0; i < N; ++i) {
-        for (int j =1; j < i; ++j){
-            yk2[i].x += dt * a[1][0] * k1[i].first;
-            yk2[i].y += dt * a[1][0] * k1[i].second;
+        yk2[i].x += dt * a[1][0] * k1[i].first;
+        yk2[i].y += dt * a[1][0] * k1[i].second;
     }
     
     
@@ -89,7 +84,7 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
     std::vector<Vortex> yk3 = y0;
     for (int i = 0; i < N; ++i) {
         yk3[i].x += dt * (a[2][0] * k1[i].first + a[2][1] * k2[i].first);
-        yk3[i].y += dt * (a[2][0] * k1[i].second + a[2][1]* k2[i].second);
+        yk3[i].y += dt * (a[2][0] * k1[i].second + a[2][1] * k2[i].second);
     }
     auto k3 = computeVelocities(yk3);
 
@@ -129,7 +124,7 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
         double dx4 = dt * (bAlt[0] * k1[i].first +  bAlt[1] * k2[i].first + bAlt[2] * k3[i].first +  bAlt[3] * k4[i].first + bAlt[4] * k5[i].first);
         double dy4 = dt * (bAlt[0] * k1[i].second  +  bAlt[1] * k2[i].second + bAlt[2] * k3[i].second + bAlt[3] * k4[i].second + bAlt[4] * k5[i].second);
 
-        double dx5 = dt * (b[0] * k1[i].first + b[1] * k2[i].first+ b[2] * k3[i].first + b[3] * k4[i].first + b[4] * k5[i].first + b[5] * k6[i].first);
+        double dx5 = dt * (b[0] * k1[i].first + b[1] * k2[i].first + b[2] * k3[i].first + b[3] * k4[i].first + b[4] * k5[i].first + b[5] * k6[i].first);
         double dy5 = dt * (b[0] * k1[i].second + b[1] * k2[i].second + b[2] * k3[i].second + b[3] * k4[i].second + b[4] * k5[i].second + b[5] * k6[i].second);
 
         double err = std::hypot(dx5 - dx4, dy5 - dy4);
@@ -157,7 +152,23 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
 }
 
 
+void simulate(std::vector<Vortex>& vortices, double& dt, double totalTime, double tol = 1e-6) {
+    double t = 0.0;
+    int step = 0;
 
+    while (t < totalTime) {
+        bool success = rkf45Step(vortices, dt, tol);
+        if (success) {
+            t += dt;
+            if (step % 10 == 0) {
+                std::cout << "t = " << t << " | dt = " << dt << " | step " << step << "\n";
+            }
+            ++step;
+        } else {
+            std::cout << "Retrying with smaller dt = " << dt << "\n";
+        }
+    }
+}
 
 
 
