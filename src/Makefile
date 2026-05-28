@@ -1,7 +1,7 @@
 OBJS = main.o read.o
 
 #This is for mac osx
-CC = g++-mp-14 -O3 -fopenmp
+CC = g++ -O3 -fopenmp
 DEBUG = 
 CFLAGS = -c $(DEBUG) -I/opt/local/include
 LFLAGS = $(DEBUG) -L/opt/local/lib -lm -lpthread 

@@ -9,7 +9,7 @@
 static double rms,dxs,dys,drs,di, st_norm;
 static mat vortex_vel(N,2,fill::zeros);
 
-void printVortex(std::vector<Vortex> vortex, double runTime, int fileNumber){
+void printVortex(VortexSystem vortex, double runTime, int fileNumber){
 
 
 		ostringstream out_vortex;
@@ -18,7 +18,7 @@ void printVortex(std::vector<Vortex> vortex, double runTime, int fileNumber){
     	ofstream fout_vortex(filename_vortex.c_str());
     	fout_vortex.precision(12);
  		fout_vortex << scientific;
-    	for(int i =0; i < N; i++){
+    	for(int i =0; i < params.N; i++){
 		   fout_vortex << vortex[i].x << " " << vortex[i].y << " " << vortex[i].circ << " " << vortex[i].u << " " << vortex[i].v << endl;
    		}
      

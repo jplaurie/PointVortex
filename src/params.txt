@@ -1,7 +1,8 @@
 
 N 100
 timeStep 0.01
-numStep 1000
+numSteps 1000
+OutputTime 0.1
 coreSize 1e-5
 numThreads 0
 boundaryCondition periodic

@@ -1,6 +1,6 @@
 
 std::vector<std::pair<double, double>> computeVelocities(
-    const std::vector<Vortex>& vortices, SimParams params) {
+    const VortexSystem& vortices, SimParams params) {
     
     
     std::vector<std::pair<double, double>> velocity(params.N, {0.0, 0.0});
@@ -28,7 +28,7 @@ std::vector<std::pair<double, double>> computeVelocities(
 
 
 
-bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
+bool rkf45Step(VortexSystem& vortices, double& dt, double tol = 1e-6) {
  
     const double SAFETY = 0.9;
     const double MIN_SCALE = 0.2;
@@ -62,15 +62,15 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
 
 
 
-    std::vector<Vortex> y0 = vortices;
+   VortexSystem y0 = vortices;
 
-    auto computeStage = [&](const std::vector<Vortex>& state, double h) {
+    auto computeStage = [&](const VortexSystem& state, double h) {
         return computeVelocities(state);
     };
 
     auto k1 = computeVelocities(y0,params);
 
-    std::vector<Vortex> yk2 = y0;
+  VortexSystem yk2 = y0;
 
 
     for (int i = 0; i < N; ++i) {
@@ -81,35 +81,35 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
     
     auto k2 = computeVelocities(yk2);
 
-    std::vector<Vortex> yk3 = y0;
+    VortexSystem yk3 = y0;
     for (int i = 0; i < N; ++i) {
         yk3[i].x += dt * (a[2][0] * k1[i].first + a[2][1] * k2[i].first);
         yk3[i].y += dt * (a[2][0] * k1[i].second + a[2][1] * k2[i].second);
     }
     auto k3 = computeVelocities(yk3);
 
-    std::vector<Vortex> yk4 = y0;
+    VortexSystem yk4 = y0;
     for (int i = 0; i < N.params; ++i) {
         yk4[i].x += dt * (a[3][0] * k1[i].first + a[3][1] * k2[i].first + a[3][2]* k3[i].first);
         yk4[i].y += dt * (a[3][0] * k1[i].second + a[3][1] * k2[i].second + a[3][2] * k3[i].second);
     }
     auto k4 = computeVelocities(yk4);
 
-    std::vector<Vortex> yk5 = y0;
+    VortexSystem yk5 = y0;
     for (int i = 0; i < N; ++i) {
         yk5[i].x += dt * (a[4][0]* k1[i].first + a[4][1] * k2[i].first + a[4][2] * k3[i].first + a[4][3] * k4[i].first);
         yk5[i].y += dt * (a[4][0]* k1[i].second + a[4][1] * k2[i].second + a[4][2] * k3[i].second + a[4][3] * k4[i].second);
     }
     auto k5 = computeVelocities(yk5);
 
-    std::vector<Vortex> yk6 = y0;
+    VortexSystem yk6 = y0;
     for (int i = 0; i < N; ++i) {
         yk6[i].x += dt * (a[5][0] * k1[i].first + a[5][1] * k2[i].first  + a[5][2] * k3[i].first + a[5][3] * k4[i].first + a[5][4] * k5[i].first);
         yk6[i].y += dt * (a[5][0] * k1[i].second + a[5][1] * k2[i].second  + a[5][2] * k3[i].second + a[5][3] * k4[i].second + a[5][4] * k5[i].second);
     auto k6 = computeVelocities(yk6);
 
 
-    std::vector<Vortex> yk7 = y0;
+    VortexSystem yk7 = y0;
     for (int i = 0; i < N; ++i) {
         yk7[i].x += dt * (a[6][0] * k1[i].first + a[6][1]* k2[i].first + a[6][2]* k3[i].first + a[6][3] * k4[i].first +a[6][4] * k5[i].first + a[6][5] * K6[i].first);
         yk7[i].y += dt * (a[6][0] * k1[i].second + a[6][1]* k2[i].second + a[6][2]* k3[i].second + a[6][3] * k4[i].second +a[6][4] * k5[i].second + a[6][5] * K6[i].second);
@@ -152,7 +152,7 @@ bool rkf45Step(std::vector<Vortex>& vortices, double& dt, double tol = 1e-6) {
 }
 
 
-void simulate(std::vector<Vortex>& vortices, double& dt, double totalTime, double tol = 1e-6) {
+void simulate(VortexSystem& vortices, double& dt, double totalTime, double tol = 1e-6) {
     double t = 0.0;
     int step = 0;
 

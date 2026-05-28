@@ -29,13 +29,13 @@ std::map<std::string, std::string> loadParams(const std::string& filename) {
 }
 */
 
-void initializeVortices(std::vector<Vortex>& vortices, SimParams params){
+void initializeVortices(VortexSystem& vortices, SimParams params){
 
 for (int i = 0; i < params.N; ++i) {
     double angle = 2 * params.PI * i / params.N;
-    vortices[i].x = cos(angle);
-    vortices[i].y = sin(angle);
-    vortices[i].circ = (i % 2 == 0) ? 1.0 : -1.0;
+    vortices.x[i] = cos(angle);
+    vortices.y[i] = sin(angle);
+    vortices.circ[i] = (i % 2 == 0) ? 1.0 : -1.0;
 }
 
 return;
@@ -59,6 +59,9 @@ SimParams loadParams(const std::string& filename) {
     };
     setters["timeStep"] = [&](const std::string& val) {
         params.timeStep = std::stod(val);
+    };
+    setters["OutputTime"] = [&](const std::string& val) {
+        params.OutputTime = std::stod(val);
     };
     setters["numSteps"] = [&](const std::string& val) {
         params.numSteps = std::stoi(val);

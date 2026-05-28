@@ -14,22 +14,23 @@
 #include "params.h"
 #include "vortex.h"
 #include "read.h"
+#include "print.h"
 
 int main() {
-
-
 
     //  Initialize Random Seed
     unsigned seed1 = std::chrono::system_clock::now().time_since_epoch().count();
     std::mt19937 generator(seed1);
     std::normal_distribution<double> distribution(0.0,1.0);
 
-
     //  Load Parameters 
     auto params = loadParams("params.txt");
 
     double dt = params.timeStep;
-
+    double runTime = 0.0;
+    int fileNumber = 0;
+    
+    
     std::cout << "Loaded " << params.N << " vortices.\n";
     // Now use these parameters in your simulation
 
@@ -46,18 +47,10 @@ int main() {
 
 
     std::cout << params.N << std::endl;
-    std::vector<Vortex> vortices(params.N);
+    VortexSystem vortices(params.N);
 
     // Initialize vortices in a circle with alternating signs
     initializeVortices(vortices, params);
-    /*for (int i = 0; i < N; ++i) {
-        double angle = 2 * PI * i / N;
-        vortices[i].x = cos(angle);
-        vortices[i].y = sin(angle);
-        vortices[i].gamma = (i % 2 == 0) ? 1.0 : -1.0;
-    }
-    */
-
 
 
     //  Timestep Loop
@@ -65,7 +58,7 @@ int main() {
         
 
          // main time stepping
-        vortices = rungeKutta45(vortices, dt);
+    //   vortices = rungeKutta45(vortices, dt);
   
         runTime += dt;  //Add dt to runTime
 
@@ -73,31 +66,31 @@ int main() {
         
        
 
-       if( int(runTime / outputTime) == fileNumber + 1){
+       if( int(runTime / params.OutputTime) == fileNumber + 1){
 
             fileNumber++;
-            printVortex(vortices, runTime, fileNumber);
+         //   printVortex(vortices, runTime, fileNumber);
 
-            computeMomentum(vortices momentumxValue, momentumyValue, momentumangularValue);
+         //   computeMomentum(vortices, momentumxValue, momentumyValue, momentumangularValue);
 
-            computeHamiltonian(vortices hamiltonianValue);
+          //  computeHamiltonian(vortices, hamiltonianValue);
 
-            printDiagnostics(hamiltonianValue, momentumxValue, momentumyValue, momentumangularValue, runTime,fileNumber);
+          //  printDiagnostics(hamiltonianValue, momentumxValue, momentumyValue, momentumangularValue, runTime,fileNumber);
 
-            if(FLAG_RECORD_ENERGY == true){
-                printRemoval(runTime,fileNumber,removeLowerCounter,removeUpperCounter, energyLowerRemoval, energyUpperRemoval,energyInjection);
-            }
+         //   if(FLAG_RECORD_ENERGY == true){
+          //      printRemoval(runTime,fileNumber,removeLowerCounter,removeUpperCounter, energyLowerRemoval, energyUpperRemoval,energyInjection);
+          //  }
         
-            std::cout << "file = " << fileNumber << " time = " << runTime << " dt = " << dt << " Ham = " << hamiltonianValue << " MomX = " << momentumxValue << " MomY = " << momentumyValue << " MomAngular = " << momentumangularValue << endl;
+          //  std::cout << "file = " << fileNumber << " time = " << runTime << " dt = " << dt << " Ham = " << hamiltonianValue << " MomX = " << momentumxValue << " MomY = " << momentumyValue << " MomAngular = " << momentumangularValue << endl;
 
-            std::cout << "Step " << step << " completed\n";
+          //  std::cout << "Step " << step << " completed\n";
         }
     }
 
     // Output final vortex positions
-    for (const auto& v : vortices) {
+ /*   for (const auto& v : vortices) {
         std::cout << v.x << " " << v.y << "\n";
     }
-
+*/
     return 0;
 }
