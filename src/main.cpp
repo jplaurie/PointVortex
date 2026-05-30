@@ -15,8 +15,9 @@
 #include "vortex.h"
 #include "read.h"
 #include "print.h"
+#include "timestep.h"
 
-int main() {
+int main(){
 
     //  Initialize Random Seed
     unsigned seed1 = std::chrono::system_clock::now().time_since_epoch().count();
@@ -27,6 +28,7 @@ int main() {
     auto params = loadParams("params.txt");
 
     double dt = params.timeStep;
+    double tol = 1.e-6;
     double runTime = 0.0;
     int fileNumber = 0;
     
@@ -52,21 +54,16 @@ int main() {
     // Initialize vortices in a circle with alternating signs
     initializeVortices(vortices, params);
 
-
+    bool success;
     //  Timestep Loop
     for (int step = 0; step < params.numSteps; ++step) {
         
 
-         // main time stepping
-    //   vortices = rungeKutta45(vortices, dt);
-  
-        runTime += dt;  //Add dt to runTime
-
+        success = rkf45Step(vortices, dt, tol);
         
-        
-       
-
-       if( int(runTime / params.OutputTime) == fileNumber + 1){
+        runTime += dt; //Add dt to runTime
+           
+        if( int(runTime / params.OutputTime) == fileNumber + 1){
 
             fileNumber++;
          //   printVortex(vortices, runTime, fileNumber);
@@ -85,12 +82,9 @@ int main() {
 
           //  std::cout << "Step " << step << " completed\n";
         }
-    }
 
-    // Output final vortex positions
- /*   for (const auto& v : vortices) {
-        std::cout << v.x << " " << v.y << "\n";
     }
-*/
+  
+
     return 0;
 }
