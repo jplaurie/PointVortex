@@ -1,8 +1,35 @@
 
+# Point-vortex example (select the geometry with boundaryCondition)
 N 100
-timeStep 0.01
-numSteps 1000
-OutputTime 0.1
-coreSize 1e-5
+timeStep 0.001
+endTime 1.0
+outputTime 0.001
+coreRadius 0.0
+integrator dopri5
+absoluteTolerance 1e-10
+relativeTolerance 1e-8
+minimumTimeStep 1e-12
+maximumTimeStep 0.01
 numThreads 0
 boundaryCondition periodic
+# Geometry options used when boundaryCondition is periodic or disk.
+boxLengthX 2.0
+boxLengthY 2.0
+periodicImageLayers 8
+randomSeed 1234567
+diskRadius 1.0
+# Remove close opposite-sign pairs after every accepted timestep. Reinjection modes are
+# none, independent, or paired; reinjection is available only for periodic and disk domains.
+dipoleRemoval false
+dipoleRemovalDistance 0.01
+dipoleReinjection none
+# Optional: a whitespace- or comma-separated file with x, y, circulation per line.
+# initialConditionFile initial.csv
+outputFile vortices.csv
+diagnosticsFile diagnostics.csv
+# Restarting restores time, timestep, step count, output index, and vortex state.
+# Use new output filenames and a new checkpoint directory when branching a run.
+# restartFile checkpoints/checkpoint_00000005.dat
+checkpointDirectory checkpoints
+overwriteOutput true
+overwriteCheckpoints true

@@ -1,9 +1,29 @@
-void printVortex(VortexSystem , double , int);
+#ifndef POINT_VORTEX_PRINT_H
+#define POINT_VORTEX_PRINT_H
+#include "compute.h"
+#include "vortex.h"
+#include <fstream>
+#include <string>
+class TrajectoryWriter {
+  public:
+    TrajectoryWriter(const std::string &filename, bool overwrite);
+    void write(double time, const VortexSystem &vortices, const VelocityField &velocity);
 
+  private:
+    std::ofstream output_;
+};
+class DiagnosticsWriter {
+  public:
+    DiagnosticsWriter(const std::string &filename, const Invariants &initial, bool overwrite);
+    void write(double time, const Invariants &values, const Invariants &segmentReference,
+               std::size_t removedPairs, std::size_t reinjectedPairs);
 
-void printDiagnostics(double , double , double ,double , double , int );
-
-
-
-void printParameters();
-void printRemoval(double , int ,int & , int & , double &, double & ,double & );
+  private:
+    std::ofstream output_;
+    Invariants initial_;
+};
+void printDiagnostics(double time, std::size_t steps, const Invariants &current,
+                      const Invariants &initial, const std::string &boundaryCondition,
+                      const Invariants &segmentReference, std::size_t removedPairs,
+                      std::size_t reinjectedPairs);
+#endif

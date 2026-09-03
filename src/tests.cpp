@@ -1,0 +1,274 @@
+#include "checkpoint.h"
+#include "compute.h"
+#include "dipole.h"
+#include "read.h"
+#include "timestep.h"
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <iostream>
+#include <numbers>
+#include <stdexcept>
+namespace {
+void near(double got, double want, double tol, const char *what) {
+    if (std::abs(got - want) > tol)
+        throw std::runtime_error(std::string(what) + " failed");
+}
+VortexSystem pair() {
+    VortexSystem s(2);
+    s.x = {-1.0, 1.0};
+    s.y = {0.0, 0.0};
+    s.circulation = {1.0, 1.0};
+    return s;
+}
+void velocityTests() {
+    VortexSystem one(1);
+    one.x[0] = 2;
+    one.y[0] = -3;
+    one.circulation[0] = 4;
+    VelocityField velocity;
+    InfinitePlaneKernel kernel;
+    kernel.evaluate(one, velocity);
+    near(velocity.x[0], 0, 0, "single u");
+    near(velocity.y[0], 0, 0, "single v");
+    const auto two = pair();
+    kernel.evaluate(two, velocity);
+    const double speed = 1.0 / (4.0 * std::numbers::pi);
+    near(velocity.y[0], -speed, 1e-15, "pair v0");
+    near(velocity.y[1], speed, 1e-15, "pair v1");
+}
+void rk4Test() {
+    auto s = pair();
+    InfinitePlaneKernel kernel;
+    RungeKuttaIntegrator rk(s.size());
+    for (int i = 0; i < 1000; ++i)
+        rk.rk4Step(s, 1e-3, kernel);
+    const double angle = 1.0 / (4.0 * std::numbers::pi);
+    near(s.x[1], std::cos(angle), 2e-12, "RK4 x");
+    near(s.y[1], std::sin(angle), 2e-12, "RK4 y");
+}
+void dopriTest() {
+    auto s = pair();
+    InfinitePlaneKernel kernel;
+    RungeKuttaIntegrator rk(s.size());
+    SimParams p;
+    p.absoluteTolerance = 1e-12;
+    p.relativeTolerance = 1e-10;
+    p.minimumTimeStep = 1e-12;
+    p.maximumTimeStep = 0.2;
+    double time = 0, dt = 0.01;
+    while (time < 1.0) {
+        auto r = rk.dopri5Step(s, std::min(dt, 1.0 - time), kernel, p);
+        time += r.acceptedTimeStep;
+        dt = r.suggestedTimeStep;
+    }
+    const double angle = 1.0 / (4.0 * std::numbers::pi);
+    near(s.x[1], std::cos(angle), 2e-10, "DOPRI x");
+    near(s.y[1], std::sin(angle), 2e-10, "DOPRI y");
+}
+void checkpointTest() {
+    const auto directory =
+        std::filesystem::temp_directory_path() /
+        ("point_vortex_checkpoint_test_" +
+         std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+    const auto state = pair();
+    const auto initial = computeInvariants(state);
+    SimParams parameters;
+    const DipoleEventState dipoleState = DipoleManager(parameters).state();
+    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
+                    IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
+                    ReinjectionMode::none, dipoleState, initial);
+    const auto restored = loadCheckpoint(checkpointPath(directory, 7));
+    near(restored.time, 1.25, 0.0, "checkpoint time");
+    near(restored.suggestedTimeStep, 0.0125, 0.0, "checkpoint timestep");
+    near(restored.vortices.x[1], state.x[1], 0.0, "checkpoint position");
+    near(restored.initialInvariants.hamiltonian, initial.hamiltonian, 0.0, "checkpoint invariant");
+    near(restored.segmentInvariants.hamiltonian, initial.hamiltonian, 0.0,
+         "checkpoint segment invariant");
+    if (restored.acceptedSteps != 42 || restored.outputIndex != 7)
+        throw std::runtime_error("checkpoint counters failed");
+    if (restored.boundaryCondition != "infinite" || restored.periodicImageLayers != 8)
+        throw std::runtime_error("checkpoint geometry failed");
+    if (restored.dipoleRemoval || restored.dipoleReinjection != ReinjectionMode::none ||
+        restored.dipoleState.randomEngineState != dipoleState.randomEngineState)
+        throw std::runtime_error("checkpoint dipole state failed");
+    bool refusedOverwrite = false;
+    try {
+        writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
+                        IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
+                        ReinjectionMode::none, dipoleState, initial);
+    } catch (const std::runtime_error &) {
+        refusedOverwrite = true;
+    }
+    if (!refusedOverwrite)
+        throw std::runtime_error("checkpoint overwrite was not refused");
+    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
+                    IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
+                    ReinjectionMode::none, dipoleState, initial, true);
+    std::filesystem::remove_all(directory);
+}
+void geometryTests() {
+    VortexSystem periodic(2);
+    periodic.x = {-0.4, 0.4};
+    periodic.y = {0.1, -0.1};
+    periodic.circulation = {1.0, -1.0};
+    PeriodicBoxKernel box(2.0, 2.0, 10);
+    VelocityField first, shifted;
+    box.evaluate(periodic, first);
+    periodic.x[0] += 2.0;
+    periodic.y[1] -= 2.0;
+    box.evaluate(periodic, shifted);
+    for (std::size_t i = 0; i < 2; ++i) {
+        near(shifted.x[i], first.x[i], 2e-14, "periodic u invariance");
+        near(shifted.y[i], first.y[i], 2e-14, "periodic v invariance");
+    }
+    VortexSystem disk(1);
+    disk.x[0] = 0.5;
+    disk.y[0] = 0.0;
+    disk.circulation[0] = 1.0;
+    DiskKernel circle(2.0);
+    circle.evaluate(disk, first);
+    near(first.x[0], 0.0, 1e-15, "disk radial velocity");
+    near(first.y[0], 0.5 / (2.0 * std::numbers::pi * (4.0 - 0.25)), 1e-15, "disk image velocity");
+    const double diskEnergy = circle.hamiltonian(disk);
+    RungeKuttaIntegrator diskIntegrator(1);
+    for (int step = 0; step < 100; ++step)
+        diskIntegrator.rk4Step(disk, 1e-3, circle);
+    near(circle.hamiltonian(disk), diskEnergy, 2e-15, "disk Hamiltonian");
+}
+void periodicInitializationTest() {
+    VortexSystem first(100), second(100);
+    initializePeriodicVortices(first, 2.0, 4.0, 42);
+    initializePeriodicVortices(second, 2.0, 4.0, 42);
+    double totalCirculation = 0.0;
+    for (std::size_t i = 0; i < first.size(); ++i) {
+        if (first.x[i] < -1.0 || first.x[i] > 1.0 || first.y[i] < -2.0 || first.y[i] > 2.0)
+            throw std::runtime_error("periodic initial position outside box");
+        near(first.x[i], second.x[i], 0.0, "periodic initialization reproducibility");
+        near(first.y[i], second.y[i], 0.0, "periodic initialization reproducibility");
+        totalCirculation += first.circulation[i];
+    }
+    near(totalCirculation, 0.0, 0.0, "periodic initial circulation");
+}
+void dipoleRemovalTest() {
+    SimParams parameters;
+    parameters.dipoleRemoval = true;
+    parameters.dipoleRemovalDistance = 0.05;
+    VortexSystem state(3);
+    state.x = {0.0, 0.01, 0.02};
+    state.y = {0.0, 0.0, 0.0};
+    state.circulation = {1.0, -1.0, -1.0};
+    DipoleManager manager(parameters);
+    if (manager.process(state) != 1 || state.size() != 1 || state.x[0] != 0.02)
+        throw std::runtime_error("closest-first dipole removal failed");
+    const auto events = manager.state();
+    if (events.removedPairs != 1 || events.reinjectedPairs != 0)
+        throw std::runtime_error("dipole removal counters failed");
+}
+void periodicReinjectionTest() {
+    SimParams parameters;
+    parameters.boundaryCondition = "periodic";
+    parameters.boxLengthX = parameters.boxLengthY = 2.0;
+    parameters.dipoleRemoval = true;
+    parameters.dipoleRemovalDistance = 0.05;
+    parameters.dipoleReinjection = ReinjectionMode::paired;
+    parameters.randomSeed = 42;
+    VortexSystem state(4);
+    state.x = {0.99, -0.99, -0.5, 0.5};
+    state.y = {0.0, 0.0, 0.5, -0.5};
+    state.circulation = {1.0, -1.0, 1.0, -1.0};
+    DipoleManager manager(parameters);
+    if (manager.process(state) != 1 || state.size() != 4)
+        throw std::runtime_error("periodic minimum-image dipole removal failed");
+    for (std::size_t i = 0; i < state.size(); ++i)
+        if (state.x[i] < -1.0 || state.x[i] > 1.0 || state.y[i] < -1.0 || state.y[i] > 1.0)
+            throw std::runtime_error("periodic reinjection outside box");
+    const double dx = std::remainder(state.x[2] - state.x[3], 2.0);
+    const double dy = std::remainder(state.y[2] - state.y[3], 2.0);
+    near(dx * dx + dy * dy, 1.0, 2e-15, "paired reinjection spacing");
+    const auto saved = manager.state();
+    DipoleManager restored(parameters, saved);
+    if (restored.state().randomEngineState != saved.randomEngineState)
+        throw std::runtime_error("reinjection random state restoration failed");
+}
+void diskReinjectionTest() {
+    SimParams parameters;
+    parameters.boundaryCondition = "disk";
+    parameters.diskRadius = 1.0;
+    parameters.dipoleRemoval = true;
+    parameters.dipoleRemovalDistance = 0.1;
+    parameters.dipoleReinjection = ReinjectionMode::independent;
+    VortexSystem state(2);
+    state.x = {0.0, 0.01};
+    state.y = {0.0, 0.0};
+    state.circulation = {2.0, -0.5};
+    DipoleManager manager(parameters);
+    manager.process(state);
+    if (state.size() != 2 || state.circulation[0] != 2.0 || state.circulation[1] != -0.5)
+        throw std::runtime_error("reinjection did not preserve circulations");
+    for (std::size_t i = 0; i < state.size(); ++i)
+        if (state.x[i] * state.x[i] + state.y[i] * state.y[i] >= 1.0)
+            throw std::runtime_error("disk reinjection outside disk");
+
+    parameters.dipoleReinjection = ReinjectionMode::paired;
+    state.x = {0.0, 0.01};
+    state.y = {0.0, 0.0};
+    state.circulation = {1.0, -1.0};
+    DipoleManager pairedManager(parameters);
+    pairedManager.process(state);
+    const double dx = state.x[0] - state.x[1];
+    const double dy = state.y[0] - state.y[1];
+    near(dx * dx + dy * dy, std::numbers::pi / 2.0, 3e-15, "paired disk reinjection spacing");
+    for (std::size_t i = 0; i < state.size(); ++i)
+        if (state.x[i] * state.x[i] + state.y[i] * state.y[i] >= 1.0)
+            throw std::runtime_error("paired disk reinjection outside disk");
+}
+class CountingKernel final : public VelocityKernel {
+  public:
+    mutable std::size_t evaluations = 0;
+    void evaluate(const std::vector<double> &x, const std::vector<double> &y,
+                  const std::vector<double> &gamma, VelocityField &velocity) const override {
+        ++evaluations;
+        kernel.evaluate(x, y, gamma, velocity);
+    }
+    double hamiltonian(const VortexSystem &state) const override {
+        return kernel.hamiltonian(state);
+    }
+
+  private:
+    InfinitePlaneKernel kernel;
+};
+void fsalTest() {
+    auto state = pair();
+    CountingKernel kernel;
+    RungeKuttaIntegrator integrator(state.size());
+    SimParams p;
+    p.absoluteTolerance = 1e-10;
+    p.relativeTolerance = 1e-8;
+    integrator.dopri5Step(state, 1e-3, kernel, p);
+    if (kernel.evaluations != 7)
+        throw std::runtime_error("first DOPRI step did not use 7 stages");
+    integrator.dopri5Step(state, 1e-3, kernel, p);
+    if (kernel.evaluations != 13)
+        throw std::runtime_error("DOPRI FSAL stage was not reused");
+}
+} // namespace
+int main() {
+    try {
+        velocityTests();
+        rk4Test();
+        dopriTest();
+        checkpointTest();
+        geometryTests();
+        periodicInitializationTest();
+        dipoleRemovalTest();
+        periodicReinjectionTest();
+        diskReinjectionTest();
+        fsalTest();
+        std::cout << "all point-vortex tests passed\n";
+    } catch (const std::exception &e) {
+        std::cerr << "test failure: " << e.what() << '\n';
+        return 1;
+    }
+}
