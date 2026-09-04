@@ -32,15 +32,23 @@ void VelocityKernel::evaluate(const VortexSystem &vortices, VelocityField &veloc
     vortices.validate();
     evaluate(vortices.x, vortices.y, vortices.circulation, velocity);
 }
+void VelocityKernel::evaluate(const std::vector<double> &x, const std::vector<double> &y,
+                              const std::vector<double> &circulation,
+                              VelocityField &velocity) const {
+    evaluateRange(x, y, circulation, velocity, 0, x.size());
+}
 double InfinitePlaneKernel::hamiltonian(const VortexSystem &vortices) const {
     return computeInvariants(vortices, std::sqrt(coreRadiusSquared_)).hamiltonian;
 }
-void InfinitePlaneKernel::evaluate(const std::vector<double> &x, const std::vector<double> &y,
-                                   const std::vector<double> &circulation,
-                                   VelocityField &velocity) const {
+void InfinitePlaneKernel::evaluateRange(const std::vector<double> &x, const std::vector<double> &y,
+                                        const std::vector<double> &circulation,
+                                        VelocityField &velocity, std::size_t begin,
+                                        std::size_t end) const {
     const std::size_t count = x.size();
     if (y.size() != count || circulation.size() != count)
         throw std::invalid_argument("vortex arrays have different lengths");
+    if (begin > end || end > count)
+        throw std::out_of_range("invalid target-vortex range");
     velocity.resize(count);
     constexpr double inverseTwoPi = 0.5 / std::numbers::pi;
     int singularPair = 0;
@@ -53,7 +61,8 @@ void InfinitePlaneKernel::evaluate(const std::vector<double> &x, const std::vect
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) if (count >= 256) reduction(| : singularPair)
 #endif
-    for (std::ptrdiff_t target = 0; target < static_cast<std::ptrdiff_t>(count); ++target) {
+    for (std::ptrdiff_t target = static_cast<std::ptrdiff_t>(begin);
+         target < static_cast<std::ptrdiff_t>(end); ++target) {
         double u = 0.0, v = 0.0;
 #ifdef _OPENMP
 #pragma omp simd reduction(+ : u, v) reduction(| : singularPair)
@@ -134,12 +143,15 @@ double PeriodicBoxKernel::hamiltonian(const VortexSystem &vortices) const {
     }
     return value;
 }
-void PeriodicBoxKernel::evaluate(const std::vector<double> &x, const std::vector<double> &y,
-                                 const std::vector<double> &circulation,
-                                 VelocityField &velocity) const {
+void PeriodicBoxKernel::evaluateRange(const std::vector<double> &x, const std::vector<double> &y,
+                                      const std::vector<double> &circulation,
+                                      VelocityField &velocity, std::size_t begin,
+                                      std::size_t end) const {
     const std::size_t count = x.size();
     if (y.size() != count || circulation.size() != count)
         throw std::invalid_argument("vortex arrays have different lengths");
+    if (begin > end || end > count)
+        throw std::out_of_range("invalid target-vortex range");
     double total = 0.0, absoluteTotal = 0.0;
     for (double gamma : circulation) {
         total += gamma;
@@ -154,7 +166,8 @@ void PeriodicBoxKernel::evaluate(const std::vector<double> &x, const std::vector
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) if (count >= 256) reduction(| : singularPair)
 #endif
-    for (std::ptrdiff_t target = 0; target < static_cast<std::ptrdiff_t>(count); ++target) {
+    for (std::ptrdiff_t target = static_cast<std::ptrdiff_t>(begin);
+         target < static_cast<std::ptrdiff_t>(end); ++target) {
         double u = 0.0, v = 0.0;
         for (std::ptrdiff_t source = 0; source < static_cast<std::ptrdiff_t>(count); ++source) {
             const double scaledDx = waveNumber * std::remainder(x[target] - x[source], lengthX_);
@@ -216,11 +229,14 @@ double DiskKernel::hamiltonian(const VortexSystem &vortices) const {
     }
     return value;
 }
-void DiskKernel::evaluate(const std::vector<double> &x, const std::vector<double> &y,
-                          const std::vector<double> &circulation, VelocityField &velocity) const {
+void DiskKernel::evaluateRange(const std::vector<double> &x, const std::vector<double> &y,
+                               const std::vector<double> &circulation, VelocityField &velocity,
+                               std::size_t begin, std::size_t end) const {
     const std::size_t count = x.size();
     if (y.size() != count || circulation.size() != count)
         throw std::invalid_argument("vortex arrays have different lengths");
+    if (begin > end || end > count)
+        throw std::out_of_range("invalid target-vortex range");
     for (std::size_t i = 0; i < count; ++i)
         if (x[i] * x[i] + y[i] * y[i] >= radiusSquared_)
             throw std::invalid_argument("vortex lies on or outside the disk");
@@ -230,7 +246,8 @@ void DiskKernel::evaluate(const std::vector<double> &x, const std::vector<double
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) if (count >= 256) reduction(| : singularPair)
 #endif
-    for (std::ptrdiff_t target = 0; target < static_cast<std::ptrdiff_t>(count); ++target) {
+    for (std::ptrdiff_t target = static_cast<std::ptrdiff_t>(begin);
+         target < static_cast<std::ptrdiff_t>(end); ++target) {
         double u = 0.0, v = 0.0;
         for (std::ptrdiff_t source = 0; source < static_cast<std::ptrdiff_t>(count); ++source) {
             if (source != target) {

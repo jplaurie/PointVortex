@@ -1,3 +1,4 @@
+#include "backend.h"
 #include "checkpoint.h"
 #include "compute.h"
 #include "print.h"
@@ -34,15 +35,6 @@ GeometryMetadata geometryMetadata(const SimParams &params) {
     return {};
 }
 
-std::unique_ptr<VelocityKernel> makeKernel(const SimParams &params) {
-    if (params.boundaryCondition == "infinite")
-        return std::make_unique<InfinitePlaneKernel>(params.coreRadius);
-    if (params.boundaryCondition == "periodic")
-        return std::make_unique<PeriodicBoxKernel>(params.boxLengthX, params.boxLengthY,
-                                                   params.periodicImageLayers);
-    return std::make_unique<DiskKernel>(params.diskRadius);
-}
-
 bool checkpointMatches(const Checkpoint &checkpoint, const SimParams &params,
                        const GeometryMetadata &geometry) {
     return checkpoint.coreRadius == params.coreRadius &&
@@ -58,8 +50,26 @@ bool checkpointMatches(const Checkpoint &checkpoint, const SimParams &params,
 }
 
 VortexSystem makeInitialState(const SimParams &params) {
-    if (!params.initialConditionFile.empty())
+    if (!params.initialConditionFile.empty()) {
+        const InitialConditionMetadata metadata =
+            readInitialConditionMetadata(params.initialConditionFile);
+        if (metadata.geometry && *metadata.geometry != params.boundaryCondition)
+            throw std::invalid_argument("initial-condition geometry is " + *metadata.geometry +
+                                        " but boundaryCondition is " + params.boundaryCondition);
+        if (params.boundaryCondition == "periodic" && metadata.boxLength &&
+            (std::abs(*metadata.boxLength - params.boxLengthX) >
+                 1e-13 * std::max(*metadata.boxLength, params.boxLengthX) ||
+             std::abs(*metadata.boxLength - params.boxLengthY) >
+                 1e-13 * std::max(*metadata.boxLength, params.boxLengthY)))
+            throw std::invalid_argument(
+                "initial-condition box length does not match simulation parameters");
+        if (params.boundaryCondition == "disk" && metadata.diskRadius &&
+            std::abs(*metadata.diskRadius - params.diskRadius) >
+                1e-13 * std::max(*metadata.diskRadius, params.diskRadius))
+            throw std::invalid_argument(
+                "initial-condition disk radius does not match simulation parameters");
         return loadVortices(params.initialConditionFile);
+    }
 
     VortexSystem vortices(params.vortexCount);
     if (params.boundaryCondition == "periodic") {
@@ -79,7 +89,11 @@ VortexSystem makeInitialState(const SimParams &params) {
 } // namespace
 
 int main(int argc, char **argv) {
+    int exitCode = 0;
+    bool backendInitialized = false;
     try {
+        backendInitialize(argc, argv);
+        backendInitialized = true;
         const std::string parameterFile = argc > 1 ? argv[1] : "params.txt";
         const SimParams params = loadParams(parameterFile);
 
@@ -99,7 +113,7 @@ int main(int argc, char **argv) {
                 "checkpoint geometry or integrator settings do not match parameters");
 
         VortexSystem vortices = restarting ? std::move(restart.vortices) : makeInitialState(params);
-        auto kernel = makeKernel(params);
+        auto kernel = makeBackendKernel(params);
         const Invariants initial =
             restarting ? restart.initialInvariants : computeInvariants(vortices, *kernel);
         DipoleManager dipoles =
@@ -114,20 +128,31 @@ int main(int argc, char **argv) {
 
         // Detect the common rerun/restart collision before opening and possibly truncating CSVs.
         const std::size_t firstCheckpointIndex = restarting ? restart.outputIndex + 1 : 0;
-        if ((!restarting || restart.time < params.endTime) && !params.overwriteCheckpoints) {
+        if (backendIsRoot() && (!restarting || restart.time < params.endTime) &&
+            !params.overwriteCheckpoints) {
             const auto firstCheckpoint =
                 checkpointPath(params.checkpointDirectory, firstCheckpointIndex);
             if (std::filesystem::exists(firstCheckpoint))
                 throw std::runtime_error("refusing to overwrite checkpoint: " +
                                          firstCheckpoint.string());
         }
-        TrajectoryWriter trajectory(params.outputFile, params.overwriteOutput);
-        DiagnosticsWriter diagnostics(params.diagnosticsFile, initial, params.overwriteOutput);
+        std::unique_ptr<TrajectoryWriter> trajectory;
+        std::unique_ptr<DiagnosticsWriter> diagnostics;
+        if (backendIsRoot()) {
+            trajectory =
+                std::make_unique<TrajectoryWriter>(params.outputFile, params.overwriteOutput);
+            diagnostics = std::make_unique<DiagnosticsWriter>(params.diagnosticsFile, initial,
+                                                              params.overwriteOutput);
+            std::cout << "backend=" << backendName() << '\n';
+        }
 
         double time = restarting ? restart.time : 0.0;
-        double dt = restarting ? restart.suggestedTimeStep
-                               : std::clamp(params.timeStep, params.minimumTimeStep,
-                                            params.maximumTimeStep);
+        double dt = restarting
+                        ? restart.suggestedTimeStep
+                        : (params.integrator == IntegratorKind::dopri5
+                               ? std::clamp(params.timeStep, params.minimumTimeStep,
+                                            params.maximumTimeStep)
+                               : params.timeStep);
         double nextOutput = restarting ? restart.nextOutputTime : params.outputTime;
         std::size_t acceptedSteps = restarting ? restart.acceptedSteps : 0;
         std::size_t outputIndex = restarting ? restart.outputIndex : 0;
@@ -137,21 +162,26 @@ int main(int argc, char **argv) {
 
         const auto writeFrame = [&] {
             kernel->evaluate(vortices, velocity);
-            trajectory.write(time, vortices, velocity);
+            if (backendIsRoot())
+                trajectory->write(time, vortices, velocity);
             const Invariants current = computeInvariants(vortices, *kernel);
             const DipoleEventState eventState = dipoles.state();
-            diagnostics.write(time, current, segmentReference, eventState.removedPairs,
-                              eventState.reinjectedPairs);
-            printDiagnostics(time, acceptedSteps, current, initial, params.boundaryCondition,
-                             segmentReference, eventState.removedPairs, eventState.reinjectedPairs);
+            if (backendIsRoot()) {
+                diagnostics->write(time, current, segmentReference, eventState.removedPairs,
+                                   eventState.reinjectedPairs);
+                printDiagnostics(time, acceptedSteps, current, initial, params.boundaryCondition,
+                                 segmentReference, eventState.removedPairs,
+                                 eventState.reinjectedPairs);
+            }
         };
         const auto writeCurrentCheckpoint = [&] {
-            writeCheckpoint(params.checkpointDirectory, vortices, initial, time, dt, nextOutput,
-                            acceptedSteps, outputIndex, params.coreRadius, params.integrator,
-                            params.boundaryCondition, geometry.lengthX, geometry.lengthY,
-                            geometry.imageLayers, params.dipoleRemoval,
-                            params.dipoleRemovalDistance, params.dipoleReinjection, dipoles.state(),
-                            segmentReference, params.overwriteCheckpoints);
+            if (backendIsRoot())
+                writeCheckpoint(params.checkpointDirectory, vortices, initial, time, dt, nextOutput,
+                                acceptedSteps, outputIndex, params.coreRadius, params.integrator,
+                                params.boundaryCondition, geometry.lengthX, geometry.lengthY,
+                                geometry.imageLayers, params.dipoleRemoval,
+                                params.dipoleRemovalDistance, params.dipoleReinjection,
+                                dipoles.state(), segmentReference, params.overwriteCheckpoints);
         };
 
         // A restarted branch records its starting frame but does not duplicate its source
@@ -176,8 +206,10 @@ int main(int argc, char **argv) {
 
             time += acceptedStep;
             ++acceptedSteps;
-            if (dipoles.process(vortices) != 0)
+            if (dipoles.process(vortices) != 0) {
+                integrator.invalidateCachedDerivative();
                 segmentReference = computeInvariants(vortices, *kernel);
+            }
 
             const double roundingSlack =
                 16.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(time));
@@ -190,9 +222,14 @@ int main(int argc, char **argv) {
             }
         }
 
-        return 0;
     } catch (const std::exception &error) {
-        std::cerr << "error: " << error.what() << '\n';
-        return 1;
+        if (backendIsRoot())
+            std::cerr << "error: " << error.what() << '\n';
+        exitCode = 1;
+        if (backendInitialized)
+            backendAbort(exitCode);
     }
+    if (backendInitialized)
+        backendFinalize();
+    return exitCode;
 }

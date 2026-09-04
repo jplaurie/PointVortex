@@ -21,28 +21,28 @@ python3 -m pip install matplotlib
 
 ## Examples
 
-Run these commands from the solver's `src` directory:
+Run these commands from the repository root:
 
 ```bash
 # Infinite plane; the script determines fixed limits from the selected frames.
-python3 ../scripts/movie/make_vortex_movie.py vortices.csv \
-    --geometry infinite --output infinite.mp4
+python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
+    --geometry infinite --output data/infinite.mp4
 
 # Square periodic box. Coordinates are wrapped for display only.
-python3 ../scripts/movie/make_vortex_movie.py vortices.csv \
-    --geometry periodic --box-length 2.0 --output periodic.mp4
+python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
+    --geometry periodic --box-length 2.0 --output data/periodic.mp4
 
 # Circular disk.
-python3 ../scripts/movie/make_vortex_movie.py vortices.csv \
-    --geometry disk --radius 1.0 --output disk.mp4
+python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
+    --geometry disk --radius 1.0 --output data/disk.mp4
 ```
 
 `--start`, `--stop`, and `--stride` select output-frame indices. For example,
 this renders frames 100 through 499, taking every second frame:
 
 ```bash
-python3 ../scripts/movie/make_vortex_movie.py vortices.csv \
-    --geometry disk --start 100 --stop 500 --stride 2 --output excerpt.mp4
+python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
+    --geometry disk --start 100 --stop 500 --stride 2 --output data/excerpt.mp4
 ```
 
 For an infinite-plane movie, `--xlim MIN MAX` and `--ylim MIN MAX` override the

@@ -7,17 +7,20 @@ class VelocityKernel {
   public:
     virtual ~VelocityKernel() = default;
     void evaluate(const VortexSystem &, VelocityField &) const;
-    virtual void evaluate(const std::vector<double> &x, const std::vector<double> &y,
-                          const std::vector<double> &circulation,
-                          VelocityField &velocity) const = 0;
+    void evaluate(const std::vector<double> &x, const std::vector<double> &y,
+                  const std::vector<double> &circulation, VelocityField &velocity) const;
+    virtual void evaluateRange(const std::vector<double> &x, const std::vector<double> &y,
+                               const std::vector<double> &circulation, VelocityField &velocity,
+                               std::size_t begin, std::size_t end) const = 0;
     virtual double hamiltonian(const VortexSystem &) const = 0;
 };
 class InfinitePlaneKernel final : public VelocityKernel {
   public:
     using VelocityKernel::evaluate;
     explicit InfinitePlaneKernel(double coreRadius = 0.0);
-    void evaluate(const std::vector<double> &, const std::vector<double> &,
-                  const std::vector<double> &, VelocityField &) const override;
+    void evaluateRange(const std::vector<double> &, const std::vector<double> &,
+                       const std::vector<double> &, VelocityField &, std::size_t,
+                       std::size_t) const override;
     double hamiltonian(const VortexSystem &) const override;
 
   private:
@@ -28,8 +31,9 @@ class PeriodicBoxKernel final : public VelocityKernel {
   public:
     using VelocityKernel::evaluate;
     PeriodicBoxKernel(double lengthX, double lengthY, int imageLayers = 8);
-    void evaluate(const std::vector<double> &, const std::vector<double> &,
-                  const std::vector<double> &, VelocityField &) const override;
+    void evaluateRange(const std::vector<double> &, const std::vector<double> &,
+                       const std::vector<double> &, VelocityField &, std::size_t,
+                       std::size_t) const override;
     double hamiltonian(const VortexSystem &) const override;
 
   private:
@@ -42,8 +46,9 @@ class DiskKernel final : public VelocityKernel {
   public:
     using VelocityKernel::evaluate;
     explicit DiskKernel(double radius);
-    void evaluate(const std::vector<double> &, const std::vector<double> &,
-                  const std::vector<double> &, VelocityField &) const override;
+    void evaluateRange(const std::vector<double> &, const std::vector<double> &,
+                       const std::vector<double> &, VelocityField &, std::size_t,
+                       std::size_t) const override;
     double hamiltonian(const VortexSystem &) const override;
 
   private:

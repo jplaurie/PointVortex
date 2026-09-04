@@ -232,6 +232,39 @@ VortexSystem loadVortices(const std::string &filename) {
         throw std::runtime_error("initial-condition file is empty");
     return vortices;
 }
+InitialConditionMetadata readInitialConditionMetadata(const std::string &filename) {
+    std::ifstream input(filename);
+    if (!input)
+        throw std::runtime_error("cannot open initial-condition file: " + filename);
+    InitialConditionMetadata metadata;
+    std::string line;
+    while (std::getline(input, line)) {
+        const auto comment = line.find('#');
+        if (comment == std::string::npos)
+            continue;
+        std::istringstream fields(line.substr(comment + 1));
+        std::string field;
+        while (fields >> field) {
+            const auto equals = field.find('=');
+            if (equals == std::string::npos)
+                continue;
+            const std::string key = field.substr(0, equals);
+            const std::string value = field.substr(equals + 1);
+            try {
+                if (key == "geometry")
+                    metadata.geometry = value;
+                else if (key == "box_length")
+                    metadata.boxLength = parseDouble(value);
+                else if (key == "disk_radius")
+                    metadata.diskRadius = parseDouble(value);
+            } catch (const std::exception &error) {
+                throw std::runtime_error("invalid initial-condition metadata: " +
+                                         std::string(error.what()));
+            }
+        }
+    }
+    return metadata;
+}
 void initializeVortices(VortexSystem &vortices, double radius) {
     for (std::size_t i = 0; i < vortices.size(); ++i) {
         const double angle =

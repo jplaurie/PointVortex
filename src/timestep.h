@@ -16,6 +16,8 @@ class RungeKuttaIntegrator {
     void rk4Step(VortexSystem &state, double dt, const VelocityKernel &kernel);
     StepResult dopri5Step(VortexSystem &state, double dt, const VelocityKernel &kernel,
                           const SimParams &params);
+    // Call after a discrete event changes positions or circulations between timesteps.
+    void invalidateCachedDerivative() noexcept { fsalValid_ = false; }
 
   private:
     PositionField initial_;

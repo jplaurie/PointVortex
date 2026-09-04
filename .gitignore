@@ -1,0 +1,15 @@
+*.o
+*.d
+/point_vortex
+/point_vortex_cpu
+/point_vortex_mpi
+/point_vortex_cuda
+/point_vortex_initial
+/benchmark
+/vortices.csv
+/diagnostics.csv
+/checkpoints/
+/build/
+/data/*
+!/data/.gitkeep
+/archive/src_ai_old/

@@ -1,6 +1,7 @@
 #include "checkpoint.h"
 #include "compute.h"
 #include "dipole.h"
+#include "initial_condition.h"
 #include "read.h"
 #include "timestep.h"
 #include <algorithm>
@@ -227,10 +228,11 @@ void diskReinjectionTest() {
 class CountingKernel final : public VelocityKernel {
   public:
     mutable std::size_t evaluations = 0;
-    void evaluate(const std::vector<double> &x, const std::vector<double> &y,
-                  const std::vector<double> &gamma, VelocityField &velocity) const override {
+    void evaluateRange(const std::vector<double> &x, const std::vector<double> &y,
+                       const std::vector<double> &gamma, VelocityField &velocity, std::size_t begin,
+                       std::size_t end) const override {
         ++evaluations;
-        kernel.evaluate(x, y, gamma, velocity);
+        kernel.evaluateRange(x, y, gamma, velocity, begin, end);
     }
     double hamiltonian(const VortexSystem &state) const override {
         return kernel.hamiltonian(state);
@@ -252,6 +254,77 @@ void fsalTest() {
     integrator.dopri5Step(state, 1e-3, kernel, p);
     if (kernel.evaluations != 13)
         throw std::runtime_error("DOPRI FSAL stage was not reused");
+    integrator.invalidateCachedDerivative();
+    integrator.dopri5Step(state, 1e-3, kernel, p);
+    if (kernel.evaluations != 20)
+        throw std::runtime_error("DOPRI FSAL cache was not invalidated after an event");
+}
+void initialConditionGeneratorTest() {
+    InitialConditionOptions periodic;
+    periodic.geometry = InitialGeometry::periodic;
+    periodic.pattern = InitialPattern::random;
+    periodic.count = 100;
+    periodic.seed = 987654;
+    periodic.boxLength = 2.0;
+    periodic.minimumSeparation = 0.02;
+    const VortexSystem first = generateInitialCondition(periodic);
+    const VortexSystem second = generateInitialCondition(periodic);
+    if (first.x != second.x || first.y != second.y || first.circulation != second.circulation)
+        throw std::runtime_error("initial-condition generator is not reproducible");
+    if (minimumVortexSeparation(first, periodic) < periodic.minimumSeparation)
+        throw std::runtime_error("generated periodic separation constraint failed");
+    double circulation = 0.0;
+    for (double value : first.circulation)
+        circulation += value;
+    near(circulation, 0.0, 0.0, "generated periodic neutrality");
+
+    InitialConditionOptions disk;
+    disk.geometry = InitialGeometry::disk;
+    disk.pattern = InitialPattern::random;
+    disk.count = 50;
+    disk.seed = 1234;
+    disk.diskRadius = 2.0;
+    disk.minimumSeparation = 0.03;
+    const VortexSystem diskState = generateInitialCondition(disk);
+    validateInitialCondition(diskState, disk);
+    for (std::size_t i = 0; i < diskState.size(); ++i)
+        if (diskState.x[i] * diskState.x[i] + diskState.y[i] * diskState.y[i] >= 4.0)
+            throw std::runtime_error("generated disk vortex lies outside disk");
+
+    InitialConditionOptions dipole;
+    dipole.geometry = InitialGeometry::periodic;
+    dipole.pattern = InitialPattern::dipole;
+    const VortexSystem dipoleState = generateInitialCondition(dipole);
+    if (dipoleState.size() != 2 || dipoleState.circulation[0] != 1.0 ||
+        dipoleState.circulation[1] != -1.0)
+        throw std::runtime_error("generated dipole case failed");
+
+    const auto filename =
+        std::filesystem::temp_directory_path() /
+        ("point_vortex_initial_test_" +
+         std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count()) +
+         ".dat");
+    writeInitialCondition(filename.string(), first, periodic);
+    const InitialConditionMetadata metadata = readInitialConditionMetadata(filename.string());
+    if (!metadata.geometry || *metadata.geometry != "periodic" || !metadata.boxLength ||
+        *metadata.boxLength != periodic.boxLength)
+        throw std::runtime_error("generated initial-condition metadata failed");
+    const VortexSystem loaded = loadVortices(filename.string());
+    std::filesystem::remove(filename);
+    if (loaded.x != first.x || loaded.y != first.y || loaded.circulation != first.circulation)
+        throw std::runtime_error("generated initial-condition round trip failed");
+
+    InitialConditionOptions invalidPair;
+    invalidPair.geometry = InitialGeometry::periodic;
+    invalidPair.pattern = InitialPattern::corotatingPair;
+    bool rejected = false;
+    try {
+        generateInitialCondition(invalidPair);
+    } catch (const std::invalid_argument &) {
+        rejected = true;
+    }
+    if (!rejected)
+        throw std::runtime_error("non-neutral periodic test case was not rejected");
 }
 } // namespace
 int main() {
@@ -266,6 +339,7 @@ int main() {
         periodicReinjectionTest();
         diskReinjectionTest();
         fsalTest();
+        initialConditionGeneratorTest();
         std::cout << "all point-vortex tests passed\n";
     } catch (const std::exception &e) {
         std::cerr << "test failure: " << e.what() << '\n';

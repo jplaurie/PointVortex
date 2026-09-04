@@ -1,9 +1,0 @@
-*.o
-*.d
-/point_vortex
-/tests
-/benchmark
-/vortices.csv
-/diagnostics.csv
-/checkpoints/
-/build/
