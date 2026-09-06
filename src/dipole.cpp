@@ -15,6 +15,12 @@ struct Candidate {
     double distanceSquared;
 };
 
+struct RemovedEvent {
+    double firstCirculation;
+    double secondCirculation = 0.0;
+    bool wallImage = false;
+};
+
 double displacement(double difference, double length, bool periodic) {
     return periodic ? std::remainder(difference, length) : difference;
 }
@@ -34,7 +40,7 @@ DipoleManager::DipoleManager(const SimParams &params, const DipoleEventState &st
 }
 
 std::size_t DipoleManager::process(VortexSystem &vortices) {
-    if (!params_.dipoleRemoval || vortices.size() < 2)
+    if (!params_.dipoleRemoval || vortices.size() == 0)
         return 0;
 
     const bool periodic = params_.boundaryCondition == "periodic";
@@ -55,6 +61,20 @@ std::size_t DipoleManager::process(VortexSystem &vortices) {
             if (distanceSquared < thresholdSquared)
                 candidates.push_back({i, j, distanceSquared});
         }
+        if (params_.boundaryCondition == "disk") {
+            const double radiusSquared = params_.diskRadius * params_.diskRadius;
+            const double radialSquared = vortices.x[i] * vortices.x[i] +
+                                         vortices.y[i] * vortices.y[i];
+            // The circle-theorem image has radius R^2/r. The removal parameter
+            // is the full real/image dipole separation, R^2/r-r. It is not
+            // exactly twice the geometric wall gap R-r for a curved wall.
+            if (radialSquared > 0.0) {
+                const double imageDistance =
+                    (radiusSquared - radialSquared) / std::sqrt(radialSquared);
+                if (imageDistance * imageDistance < thresholdSquared)
+                    candidates.push_back({i, vortices.size(), imageDistance * imageDistance});
+            }
+        }
     }
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate &left, const Candidate &right) {
@@ -64,22 +84,30 @@ std::size_t DipoleManager::process(VortexSystem &vortices) {
               });
 
     std::vector<bool> selected(vortices.size(), false);
-    std::vector<std::pair<double, double>> circulations;
+    std::vector<RemovedEvent> events;
     for (const Candidate &candidate : candidates) {
-        if (selected[candidate.first] || selected[candidate.second])
+        if (selected[candidate.first] ||
+            (candidate.second < vortices.size() && selected[candidate.second]))
             continue;
-        selected[candidate.first] = selected[candidate.second] = true;
-        circulations.emplace_back(vortices.circulation[candidate.first],
-                                  vortices.circulation[candidate.second]);
+        selected[candidate.first] = true;
+        if (candidate.second < vortices.size()) {
+            selected[candidate.second] = true;
+            events.push_back({vortices.circulation[candidate.first],
+                              vortices.circulation[candidate.second], false});
+        } else {
+            events.push_back({vortices.circulation[candidate.first], 0.0, true});
+        }
     }
-    if (circulations.empty())
+    if (events.empty())
         return 0;
 
     const std::size_t originalPopulation = vortices.size();
     VortexSystem survivors;
-    survivors.x.reserve(originalPopulation - 2 * circulations.size());
-    survivors.y.reserve(originalPopulation - 2 * circulations.size());
-    survivors.circulation.reserve(originalPopulation - 2 * circulations.size());
+    const std::size_t selectedCount =
+        static_cast<std::size_t>(std::count(selected.begin(), selected.end(), true));
+    survivors.x.reserve(originalPopulation - selectedCount);
+    survivors.y.reserve(originalPopulation - selectedCount);
+    survivors.circulation.reserve(originalPopulation - selectedCount);
     for (std::size_t i = 0; i < originalPopulation; ++i) {
         if (!selected[i]) {
             survivors.x.push_back(vortices.x[i]);
@@ -88,14 +116,28 @@ std::size_t DipoleManager::process(VortexSystem &vortices) {
         }
     }
     vortices = std::move(survivors);
-    removedPairs_ += circulations.size();
+    removedPairs_ += events.size();
 
     if (params_.dipoleReinjection != ReinjectionMode::none) {
-        for (const auto &[first, second] : circulations)
-            injectPair(vortices, first, second, originalPopulation);
-        reinjectedPairs_ += circulations.size();
+        for (const RemovedEvent &event : events) {
+            if (event.wallImage)
+                injectSingle(vortices, event.firstCirculation);
+            else
+                injectPair(vortices, event.firstCirculation, event.secondCirculation,
+                           originalPopulation);
+        }
+        reinjectedPairs_ += events.size();
     }
-    return circulations.size();
+    return events.size();
+}
+
+void DipoleManager::injectSingle(VortexSystem &vortices, double circulation) {
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    const double radius = params_.diskRadius * std::sqrt(unit(random_));
+    const double angle = 2.0 * std::numbers::pi * unit(random_);
+    vortices.x.push_back(radius * std::cos(angle));
+    vortices.y.push_back(radius * std::sin(angle));
+    vortices.circulation.push_back(circulation);
 }
 
 void DipoleManager::injectPair(VortexSystem &vortices, double firstCirculation,

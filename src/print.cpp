@@ -6,6 +6,9 @@
 TrajectoryWriter::TrajectoryWriter(const std::string &filename, bool overwrite) {
     if (!overwrite && std::filesystem::exists(filename))
         throw std::runtime_error("refusing to overwrite output file: " + filename);
+    const auto parent = std::filesystem::path(filename).parent_path();
+    if (!parent.empty())
+        std::filesystem::create_directories(parent);
     output_.open(filename, std::ios::trunc);
     if (!output_)
         throw std::runtime_error("cannot open output file: " + filename);
@@ -29,6 +32,9 @@ DiagnosticsWriter::DiagnosticsWriter(const std::string &filename, const Invarian
     : initial_(initial) {
     if (!overwrite && std::filesystem::exists(filename))
         throw std::runtime_error("refusing to overwrite diagnostics file: " + filename);
+    const auto parent = std::filesystem::path(filename).parent_path();
+    if (!parent.empty())
+        std::filesystem::create_directories(parent);
     output_.open(filename, std::ios::trunc);
     if (!output_)
         throw std::runtime_error("cannot open diagnostics file: " + filename);

@@ -11,6 +11,25 @@
 
 namespace {
 
+void validateOptions(const InitialConditionOptions &options) {
+    if (options.count == 0)
+        throw std::invalid_argument("vortex count must be positive");
+    for (double value :
+         {options.circulationMagnitude, options.minimumSeparation, options.infiniteHalfWidth,
+          options.boxLength, options.diskRadius, options.ringRadius})
+        if (!std::isfinite(value))
+            throw std::invalid_argument("initial-condition options must be finite");
+    if (!(options.circulationMagnitude > 0.0) || !(options.minimumSeparation >= 0.0) ||
+        !(options.infiniteHalfWidth > 0.0) || !(options.boxLength > 0.0) ||
+        !(options.diskRadius > 0.0) || !(options.ringRadius >= 0.0))
+        throw std::invalid_argument("invalid initial-condition option");
+    if (options.geometry == InitialGeometry::periodic &&
+        ((options.pattern == InitialPattern::random || options.pattern == InitialPattern::ring)
+             ? options.count % 2 != 0
+             : options.pattern != InitialPattern::dipole))
+        throw std::invalid_argument("periodic initial condition must have zero circulation");
+}
+
 double distance(const VortexSystem &vortices, std::size_t first, std::size_t second,
                 const InitialConditionOptions &options) {
     double dx = vortices.x[first] - vortices.x[second];
@@ -152,10 +171,7 @@ void validateInitialCondition(const VortexSystem &vortices,
     vortices.validate();
     if (vortices.size() == 0)
         throw std::invalid_argument("vortex count must be positive");
-    if (!(options.circulationMagnitude > 0.0) || !(options.minimumSeparation >= 0.0) ||
-        !(options.infiniteHalfWidth > 0.0) || !(options.boxLength > 0.0) ||
-        !(options.diskRadius > 0.0) || !(options.ringRadius >= 0.0))
-        throw std::invalid_argument("invalid initial-condition option");
+    validateOptions(options);
 
     double totalCirculation = 0.0;
     for (std::size_t i = 0; i < vortices.size(); ++i) {
@@ -181,8 +197,7 @@ void validateInitialCondition(const VortexSystem &vortices,
 }
 
 VortexSystem generateInitialCondition(const InitialConditionOptions &options) {
-    if (options.count == 0)
-        throw std::invalid_argument("vortex count must be positive");
+    validateOptions(options);
     VortexSystem vortices;
     if (options.pattern == InitialPattern::random)
         vortices = makeRandom(options);
@@ -199,6 +214,9 @@ void writeInitialCondition(const std::string &filename, const VortexSystem &vort
     validateInitialCondition(vortices, options);
     if (!overwrite && std::filesystem::exists(filename))
         throw std::runtime_error("refusing to overwrite initial-condition file: " + filename);
+    const auto parent = std::filesystem::path(filename).parent_path();
+    if (!parent.empty())
+        std::filesystem::create_directories(parent);
     std::ofstream output(filename, std::ios::trunc);
     if (!output)
         throw std::runtime_error("cannot write initial-condition file: " + filename);
@@ -214,6 +232,7 @@ void writeInitialCondition(const std::string &filename, const VortexSystem &vort
     for (std::size_t i = 0; i < vortices.size(); ++i)
         output << std::setprecision(17) << vortices.x[i] << ' ' << vortices.y[i] << ' '
                << vortices.circulation[i] << '\n';
+    output.close();
     if (!output)
         throw std::runtime_error("failed while writing initial-condition file: " + filename);
 }

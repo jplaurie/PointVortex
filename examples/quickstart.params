@@ -1,0 +1,16 @@
+# Run from the repository root; output directories are created automatically.
+# Two opposite-sign vortices on the built-in unit-radius ring.
+N 2
+boundaryCondition infinite
+coreRadius 0
+integrator rk4
+timeStep 0.001
+endTime 0.1
+outputTime 0.02
+numThreads 1
+dipoleRemoval false
+outputFile data/quickstart/vortices.csv
+diagnosticsFile data/quickstart/diagnostics.csv
+checkpointDirectory data/quickstart/checkpoints
+overwriteOutput false
+overwriteCheckpoints false

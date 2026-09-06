@@ -19,7 +19,8 @@ __global__ void velocityKernel(const double *x, const double *y, const double *g
                                double *v, std::size_t count, std::size_t begin, std::size_t end,
                                Geometry geometry, double first, double second, int imageLayers,
                                int *singular) {
-    const std::size_t target = begin + blockIdx.x * blockDim.x + threadIdx.x;
+    const std::size_t target =
+        begin + static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (target >= end)
         return;
     constexpr double inverseTwoPi = 0.15915494309189533576888376337251;
@@ -46,16 +47,16 @@ __global__ void velocityKernel(const double *x, const double *y, const double *g
             const double dx = waveNumber * remainder(x[target] - x[source], first);
             const double dy = waveNumber * remainder(y[target] - y[source], second);
             const double sineX = sin(dx), sineY = sin(dy);
-            const double cosineX = cos(dx), cosineY = cos(dy);
+            const double sinHalfX = sin(0.5 * dx), sinHalfY = sin(0.5 * dy);
             for (int image = -imageLayers; image <= imageLayers; ++image) {
                 if (source == target && image == 0)
                     continue;
                 const double shiftedX = dx - twoPi * image;
                 const double shiftedY = dy - twoPi * image;
-                const double denominatorU =
-                    fabs(shiftedX) > 40.0 ? CUDART_INF : cosh(shiftedX) - cosineY;
-                const double denominatorV =
-                    fabs(shiftedY) > 40.0 ? CUDART_INF : cosh(shiftedY) - cosineX;
+                const double sinhHalfX = fabs(shiftedX) > 40.0 ? CUDART_INF : sinh(0.5 * shiftedX);
+                const double sinhHalfY = fabs(shiftedY) > 40.0 ? CUDART_INF : sinh(0.5 * shiftedY);
+                const double denominatorU = 2.0 * (sinhHalfX * sinhHalfX + sinHalfY * sinHalfY);
+                const double denominatorV = 2.0 * (sinhHalfY * sinhHalfY + sinHalfX * sinHalfX);
                 if (denominatorU == 0.0 || denominatorV == 0.0) {
                     atomicExch(singular, 1);
                     continue;
@@ -76,16 +77,16 @@ __global__ void velocityKernel(const double *x, const double *y, const double *g
                     velocityY += coefficient * dx;
                 }
             }
-            const double sourceRadiusSquared = x[source] * x[source] + y[source] * y[source];
-            if (sourceRadiusSquared != 0.0) {
-                const double imageScale = first / sourceRadiusSquared;
-                const double dx = x[target] - imageScale * x[source];
-                const double dy = y[target] - imageScale * y[source];
-                const double denominator = dx * dx + dy * dy;
-                const double coefficient = -inverseTwoPi * gamma[source] / denominator;
-                velocityX -= coefficient * dy;
-                velocityY += coefficient * dx;
-            }
+            const double tx = x[target] / first, ty = y[target] / first;
+            const double sx = x[source] / first, sy = y[source] / first;
+            const double a = 1.0 - (tx * sx + ty * sy);
+            const double b = ty * sx - tx * sy;
+            const double denominator = a * a + b * b;
+            const double imageX = -a * sx - b * sy;
+            const double imageY = -a * sy + b * sx;
+            const double coefficient = -inverseTwoPi * gamma[source] / first / denominator;
+            velocityX -= coefficient * imageY;
+            velocityY += coefficient * imageX;
         }
     }
     u[target] = velocityX;
@@ -108,6 +109,7 @@ class CudaKernel final : public VelocityKernel {
     void evaluateRange(const std::vector<double> &x, const std::vector<double> &y,
                        const std::vector<double> &gamma, VelocityField &velocity, std::size_t begin,
                        std::size_t end) const override {
+        validateVortexArrays(x, y, gamma);
         const std::size_t count = x.size();
         if (y.size() != count || gamma.size() != count || begin > end || end > count)
             throw std::invalid_argument("invalid CUDA vortex arrays or target range");
@@ -140,8 +142,7 @@ class CudaKernel final : public VelocityKernel {
         const double first =
             geometry_ == Geometry::infinite
                 ? params_.coreRadius * params_.coreRadius
-                : (geometry_ == Geometry::periodic ? params_.boxLengthX
-                                                   : params_.diskRadius * params_.diskRadius);
+                : (geometry_ == Geometry::periodic ? params_.boxLengthX : params_.diskRadius);
         velocityKernel<<<blocks, threads>>>(deviceX_, deviceY_, deviceGamma_, deviceU_, deviceV_,
                                             count, begin, end, geometry_, first, params_.boxLengthY,
                                             params_.periodicImageLayers, deviceSingular_);

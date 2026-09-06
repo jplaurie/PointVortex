@@ -21,3 +21,8 @@ domain size, input CSV paths, number of snapshots, and output directory. The def
 The notebook requires Python 3, NumPy, Matplotlib, and Jupyter. It does not require pandas or a
 LaTeX installation. It searches upward for the repository root, so it can also be launched from
 the notebook directory.
+
+The two files may have different output intervals. Each plot uses the corresponding file's time
+column. If the trajectory has no rows because all vortices were removed before the first output,
+the notebook still writes diagnostics and skips the configuration figure with a message.
+Configurations otherwise use only saved frames with surviving vortices.

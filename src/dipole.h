@@ -20,7 +20,9 @@ class DipoleManager {
     explicit DipoleManager(const SimParams &params);
     DipoleManager(const SimParams &params, const DipoleEventState &state);
 
-    // Remove all closest-first, disjoint opposite-sign pairs below the threshold.
+    // Remove all closest-first, disjoint real dipoles below the threshold. In a disk,
+    // a real vortex and its opposite-sign circle-theorem image are also a candidate;
+    // that wall event removes only the real vortex.
     // Returns the number of pairs processed during this call.
     std::size_t process(VortexSystem &vortices);
     [[nodiscard]] DipoleEventState state() const;
@@ -33,6 +35,7 @@ class DipoleManager {
 
     void injectPair(VortexSystem &vortices, double firstCirculation, double secondCirculation,
                     std::size_t population);
+    void injectSingle(VortexSystem &vortices, double circulation);
 };
 
 #endif

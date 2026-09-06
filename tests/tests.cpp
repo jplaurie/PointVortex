@@ -13,7 +13,7 @@
 #include <stdexcept>
 namespace {
 void near(double got, double want, double tol, const char *what) {
-    if (std::abs(got - want) > tol)
+    if (!std::isfinite(got) || !std::isfinite(want) || std::abs(got - want) > tol)
         throw std::runtime_error(std::string(what) + " failed");
 }
 VortexSystem pair() {
@@ -77,10 +77,18 @@ void checkpointTest() {
     const auto initial = computeInvariants(state);
     SimParams parameters;
     const DipoleEventState dipoleState = DipoleManager(parameters).state();
+    const OutputSchedule schedule{0.1, 0.2, 0.5, 1.4, 1.5};
     writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
                     IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
-                    ReinjectionMode::none, dipoleState, initial);
+                    ReinjectionMode::none, dipoleState, initial, schedule);
     const auto restored = loadCheckpoint(checkpointPath(directory, 7));
+    if (!restored.hasOutputSchedule)
+        throw std::runtime_error("checkpoint output schedule missing");
+    near(restored.outputSchedule.nextDiagnosticsTime, 1.4, 0.0, "next diagnostics time");
+    near(restored.outputSchedule.nextCheckpointTime, 1.5, 0.0, "next checkpoint time");
+    near(restored.outputSchedule.trajectoryInterval, 0.1, 0.0, "trajectory interval");
+    near(restored.outputSchedule.diagnosticsInterval, 0.2, 0.0, "diagnostics interval");
+    near(restored.outputSchedule.checkpointInterval, 0.5, 0.0, "checkpoint interval");
     near(restored.time, 1.25, 0.0, "checkpoint time");
     near(restored.suggestedTimeStep, 0.0125, 0.0, "checkpoint timestep");
     near(restored.vortices.x[1], state.x[1], 0.0, "checkpoint position");
@@ -98,7 +106,7 @@ void checkpointTest() {
     try {
         writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
                         IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
-                        ReinjectionMode::none, dipoleState, initial);
+                        ReinjectionMode::none, dipoleState, initial, schedule);
     } catch (const std::runtime_error &) {
         refusedOverwrite = true;
     }
@@ -106,7 +114,7 @@ void checkpointTest() {
         throw std::runtime_error("checkpoint overwrite was not refused");
     writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
                     IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
-                    ReinjectionMode::none, dipoleState, initial, true);
+                    ReinjectionMode::none, dipoleState, initial, schedule, true);
     std::filesystem::remove_all(directory);
 }
 void geometryTests() {
@@ -225,6 +233,45 @@ void diskReinjectionTest() {
         if (state.x[i] * state.x[i] + state.y[i] * state.y[i] >= 1.0)
             throw std::runtime_error("paired disk reinjection outside disk");
 }
+void diskWallDipoleRemovalTest() {
+    SimParams parameters;
+    parameters.boundaryCondition = "disk";
+    parameters.diskRadius = 1.0;
+    parameters.dipoleRemoval = true;
+    parameters.dipoleRemovalDistance = 0.05;
+    parameters.dipoleReinjection = ReinjectionMode::none;
+    VortexSystem state(2);
+    state.x = {0.98, 0.0};
+    state.y = {0.0, 0.0};
+    state.circulation = {1.0, -1.0};
+    DipoleManager manager(parameters);
+    if (manager.process(state) != 1 || state.size() != 1 || state.circulation[0] != -1.0)
+        throw std::runtime_error("disk wall-image dipole removal failed");
+    const auto events = manager.state();
+    if (events.removedPairs != 1 || events.reinjectedPairs != 0)
+        throw std::runtime_error("disk wall-image event counters failed");
+
+    // For a circular wall the exact image separation is R^2/r-r. The
+    // geometric wall gap R-r is only asymptotically half of that distance.
+    const double radius = 0.98;
+    const double imageRadius = 1.0 / radius;
+    const double imageDistance = imageRadius - radius;
+    const double wallGap = 1.0 - radius;
+    near(imageDistance, (1.0 - radius * radius) / radius, 1e-15,
+         "disk wall-image distance");
+    if (std::abs(2.0 * wallGap - imageDistance) < 1e-6)
+        throw std::runtime_error("curved-wall image distance was treated as exactly twice the wall gap");
+
+    parameters.dipoleReinjection = ReinjectionMode::paired;
+    state = VortexSystem(1);
+    state.x[0] = 0.98;
+    state.circulation[0] = 2.0;
+    DipoleManager reinjected(parameters);
+    if (reinjected.process(state) != 1 || state.size() != 1 || state.circulation[0] != 2.0)
+        throw std::runtime_error("disk wall-image reinjection did not preserve population");
+    if (state.x[0] * state.x[0] + state.y[0] * state.y[0] >= 1.0)
+        throw std::runtime_error("disk wall-image reinjection outside disk");
+}
 class CountingKernel final : public VelocityKernel {
   public:
     mutable std::size_t evaluations = 0;
@@ -338,6 +385,7 @@ int main() {
         dipoleRemovalTest();
         periodicReinjectionTest();
         diskReinjectionTest();
+        diskWallDipoleRemovalTest();
         fsalTest();
         initialConditionGeneratorTest();
         std::cout << "all point-vortex tests passed\n";

@@ -1,5 +1,6 @@
 #include "initial_condition.h"
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string>

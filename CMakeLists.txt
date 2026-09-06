@@ -3,8 +3,8 @@ project(PointVortex VERSION 0.1.0 LANGUAGES CXX)
 option(POINT_VORTEX_OPENMP "Enable OpenMP acceleration" ON)
 option(POINT_VORTEX_MPI "Build the MPI backend" ON)
 option(POINT_VORTEX_CUDA "Build the CUDA backend" ON)
-set(POINT_VORTEX_CUDA_ARCHITECTURES "120" CACHE STRING
-    "CUDA architectures passed to CMake (120 is the RTX 5070)")
+set(POINT_VORTEX_CUDA_ARCHITECTURES "" CACHE STRING
+    "Optional CUDA architecture override; empty uses CMake/toolchain defaults")
 add_library(point_vortex_lib src/compute.cpp src/timestep.cpp src/read.cpp src/checkpoint.cpp
                              src/dipole.cpp src/backend_common.cpp
                              initial_conditions/initial_condition.cpp)
@@ -43,8 +43,13 @@ if(POINT_VORTEX_CUDA)
     enable_language(CUDA)
     add_executable(point_vortex_cuda src/main.cpp src/print.cpp src/backend_cuda.cu)
     target_link_libraries(point_vortex_cuda PRIVATE point_vortex_lib)
+    if(NOT POINT_VORTEX_CUDA_ARCHITECTURES STREQUAL "")
+      set_property(TARGET point_vortex_cuda PROPERTY
+                   CUDA_ARCHITECTURES "${POINT_VORTEX_CUDA_ARCHITECTURES}")
+    endif()
+    get_target_property(_pv_cuda_architectures point_vortex_cuda CUDA_ARCHITECTURES)
+    message(STATUS "PointVortex CUDA architectures: ${_pv_cuda_architectures}")
     set_target_properties(point_vortex_cuda PROPERTIES
-                                                       CUDA_ARCHITECTURES ${POINT_VORTEX_CUDA_ARCHITECTURES}
                                                        CUDA_STANDARD 20
                                                        CUDA_STANDARD_REQUIRED ON)
   else()
@@ -60,4 +65,13 @@ if(BUILD_TESTING)
   add_executable(point_vortex_tests tests/tests.cpp)
   target_link_libraries(point_vortex_tests PRIVATE point_vortex_lib)
   add_test(NAME point_vortex_tests COMMAND point_vortex_tests)
+  add_executable(point_vortex_audit_tests tests/audit_tests.cpp)
+  target_link_libraries(point_vortex_audit_tests PRIVATE point_vortex_lib)
+  add_test(NAME point_vortex_audit_tests COMMAND point_vortex_audit_tests)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME point_vortex_output_tests
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/output_integration.py
+                     $<TARGET_FILE:point_vortex_cpu>)
+  endif()
 endif()

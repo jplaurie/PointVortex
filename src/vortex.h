@@ -1,8 +1,17 @@
 #ifndef POINT_VORTEX_VORTEX_H
 #define POINT_VORTEX_VORTEX_H
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
 #include <vector>
+inline void validateVortexArrays(const std::vector<double> &x, const std::vector<double> &y,
+                                 const std::vector<double> &circulation) {
+    if (x.size() != y.size() || x.size() != circulation.size())
+        throw std::invalid_argument("vortex arrays have different lengths");
+    for (std::size_t i = 0; i < x.size(); ++i)
+        if (!std::isfinite(x[i]) || !std::isfinite(y[i]) || !std::isfinite(circulation[i]))
+            throw std::invalid_argument("vortex data must be finite");
+}
 struct VortexSystem {
     // Structure-of-arrays storage keeps each hot numerical stream contiguous.
     std::vector<double> x;
@@ -15,10 +24,7 @@ struct VortexSystem {
         y.resize(n);
         circulation.resize(n);
     }
-    void validate() const {
-        if (x.size() != y.size() || x.size() != circulation.size())
-            throw std::invalid_argument("vortex arrays have different lengths");
-    }
+    void validate() const { validateVortexArrays(x, y, circulation); }
 };
 // Runge--Kutta stage positions do not need a copy of the constant circulations.
 struct PositionField {

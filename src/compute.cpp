@@ -1,4 +1,5 @@
 #include "compute.h"
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -18,6 +19,10 @@ Invariants computeMoments(const VortexSystem &vortices) {
         result.angularImpulse +=
             gamma * (vortices.x[i] * vortices.x[i] + vortices.y[i] * vortices.y[i]);
     }
+    for (double value :
+         {result.circulation, result.linearImpulseX, result.linearImpulseY, result.angularImpulse})
+        if (!std::isfinite(value))
+            throw std::runtime_error("non-finite vortex moment; check input scales");
     return result;
 }
 
@@ -25,17 +30,22 @@ Invariants computeMoments(const VortexSystem &vortices) {
 
 InfinitePlaneKernel::InfinitePlaneKernel(double coreRadius)
     : coreRadiusSquared_(coreRadius * coreRadius) {
-    if (!(coreRadius >= 0.0))
-        throw std::invalid_argument("core radius must be non-negative");
+    if (!(coreRadius >= 0.0) || !std::isfinite(coreRadiusSquared_) ||
+        (coreRadius > 0.0 && coreRadiusSquared_ == 0.0))
+        throw std::invalid_argument("core radius is negative or outside the supported numeric range");
 }
 void VelocityKernel::evaluate(const VortexSystem &vortices, VelocityField &velocity) const {
-    vortices.validate();
     evaluate(vortices.x, vortices.y, vortices.circulation, velocity);
 }
 void VelocityKernel::evaluate(const std::vector<double> &x, const std::vector<double> &y,
                               const std::vector<double> &circulation,
                               VelocityField &velocity) const {
     evaluateRange(x, y, circulation, velocity, 0, x.size());
+    if (velocity.x.size() != x.size() || velocity.y.size() != x.size())
+        throw std::runtime_error("kernel returned invalid velocity arrays");
+    for (std::size_t i = 0; i < x.size(); ++i)
+        if (!std::isfinite(velocity.x[i]) || !std::isfinite(velocity.y[i]))
+            throw std::runtime_error("non-finite velocity; check scales and close encounters");
 }
 double InfinitePlaneKernel::hamiltonian(const VortexSystem &vortices) const {
     return computeInvariants(vortices, std::sqrt(coreRadiusSquared_)).hamiltonian;
@@ -45,8 +55,7 @@ void InfinitePlaneKernel::evaluateRange(const std::vector<double> &x, const std:
                                         VelocityField &velocity, std::size_t begin,
                                         std::size_t end) const {
     const std::size_t count = x.size();
-    if (y.size() != count || circulation.size() != count)
-        throw std::invalid_argument("vortex arrays have different lengths");
+    validateVortexArrays(x, y, circulation);
     if (begin > end || end > count)
         throw std::out_of_range("invalid target-vortex range");
     velocity.resize(count);
@@ -88,6 +97,10 @@ void InfinitePlaneKernel::evaluateRange(const std::vector<double> &x, const std:
         throw std::runtime_error("coincident vortices in singular point-vortex kernel");
 }
 Invariants computeInvariants(const VortexSystem &vortices, double coreRadius) {
+    if (!(coreRadius >= 0.0) || !std::isfinite(coreRadius) ||
+        !std::isfinite(coreRadius * coreRadius) ||
+        (coreRadius > 0.0 && coreRadius * coreRadius == 0.0))
+        throw std::invalid_argument("core radius is negative or outside the supported numeric range");
     Invariants result = computeMoments(vortices);
     const double epsilonSquared = coreRadius * coreRadius;
     for (std::size_t i = 0; i < vortices.size(); ++i) {
@@ -101,17 +114,27 @@ Invariants computeInvariants(const VortexSystem &vortices, double coreRadius) {
                                   (4.0 * std::numbers::pi);
         }
     }
+    if (!std::isfinite(result.hamiltonian))
+        throw std::runtime_error("non-finite Hamiltonian; check input scales");
     return result;
 }
 Invariants computeInvariants(const VortexSystem &vortices, const VelocityKernel &kernel) {
     Invariants result = computeMoments(vortices);
+    for (double value : {result.circulation, result.linearImpulseX, result.linearImpulseY,
+                         result.angularImpulse})
+        if (!std::isfinite(value))
+            throw std::runtime_error("non-finite vortex moment; check input scales");
     result.hamiltonian = kernel.hamiltonian(vortices);
+    if (!std::isfinite(result.hamiltonian))
+        throw std::runtime_error("non-finite Hamiltonian; check input scales");
     return result;
 }
 
 PeriodicBoxKernel::PeriodicBoxKernel(double lengthX, double lengthY, int imageLayers)
     : lengthX_(lengthX), lengthY_(lengthY), imageLayers_(imageLayers) {
-    if (!(lengthX > 0.0) || !(lengthY > 0.0) || imageLayers < 0)
+    if (!(lengthX > 0.0) || !(lengthY > 0.0) || !std::isfinite(lengthX) ||
+        !std::isfinite(lengthY) || !std::isfinite(2.0 * std::numbers::pi / lengthX) ||
+        imageLayers < 0 || imageLayers > 64)
         throw std::invalid_argument("invalid periodic-box parameters");
     if (std::abs(lengthX - lengthY) > 1e-13 * std::max(lengthX, lengthY))
         throw std::invalid_argument("Weiss-McWilliams kernel requires a square periodic box");
@@ -132,7 +155,9 @@ double PeriodicBoxKernel::hamiltonian(const VortexSystem &vortices) const {
             double pairEnergy = -dx * dx / (2.0 * std::numbers::pi);
             for (int image = -imageLayers_; image <= imageLayers_; ++image) {
                 const double shifted = dx - 2.0 * std::numbers::pi * image;
-                const double denominator = std::cosh(shifted) - std::cos(dy);
+                const double sinhHalf = std::sinh(0.5 * shifted);
+                const double sinHalf = std::sin(0.5 * dy);
+                const double denominator = 2.0 * (sinhHalf * sinhHalf + sinHalf * sinHalf);
                 if (denominator == 0.0)
                     throw std::runtime_error("coincident periodic vortices");
                 pairEnergy += std::log(denominator) - logCosh(2.0 * std::numbers::pi * image);
@@ -148,8 +173,7 @@ void PeriodicBoxKernel::evaluateRange(const std::vector<double> &x, const std::v
                                       VelocityField &velocity, std::size_t begin,
                                       std::size_t end) const {
     const std::size_t count = x.size();
-    if (y.size() != count || circulation.size() != count)
-        throw std::invalid_argument("vortex arrays have different lengths");
+    validateVortexArrays(x, y, circulation);
     if (begin > end || end > count)
         throw std::out_of_range("invalid target-vortex range");
     double total = 0.0, absoluteTotal = 0.0;
@@ -173,19 +197,23 @@ void PeriodicBoxKernel::evaluateRange(const std::vector<double> &x, const std::v
             const double scaledDx = waveNumber * std::remainder(x[target] - x[source], lengthX_);
             const double scaledDy = waveNumber * std::remainder(y[target] - y[source], lengthY_);
             const double sineX = std::sin(scaledDx), sineY = std::sin(scaledDy);
-            const double cosineX = std::cos(scaledDx), cosineY = std::cos(scaledDy);
+            const double sinHalfX = std::sin(0.5 * scaledDx);
+            const double sinHalfY = std::sin(0.5 * scaledDy);
             // Complementary sum orientations minimize finite-truncation drift.
             for (int image = -imageLayers_; image <= imageLayers_; ++image) {
                 if (source == target && image == 0)
                     continue;
                 const double shiftedX = scaledDx - 2.0 * std::numbers::pi * image;
                 const double shiftedY = scaledDy - 2.0 * std::numbers::pi * image;
-                const double denominatorU = std::abs(shiftedX) > 40.0
-                                                ? std::numeric_limits<double>::infinity()
-                                                : std::cosh(shiftedX) - cosineY;
-                const double denominatorV = std::abs(shiftedY) > 40.0
-                                                ? std::numeric_limits<double>::infinity()
-                                                : std::cosh(shiftedY) - cosineX;
+                // cosh(a)-cos(b) loses all significant digits for close pairs.
+                const auto denominator = [](double a, double sinHalfB) {
+                    if (std::abs(a) > 40.0)
+                        return std::numeric_limits<double>::infinity();
+                    const double sinhHalfA = std::sinh(0.5 * a);
+                    return 2.0 * (sinhHalfA * sinhHalfA + sinHalfB * sinHalfB);
+                };
+                const double denominatorU = denominator(shiftedX, sinHalfY);
+                const double denominatorV = denominator(shiftedY, sinHalfX);
                 if (denominatorU == 0.0 || denominatorV == 0.0) {
                     singularPair = 1;
                     continue;
@@ -202,7 +230,7 @@ void PeriodicBoxKernel::evaluateRange(const std::vector<double> &x, const std::v
 }
 
 DiskKernel::DiskKernel(double radius) : radius_(radius), radiusSquared_(radius * radius) {
-    if (!(radius > 0.0))
+    if (!(radius > 0.0) || !std::isfinite(radiusSquared_) || radiusSquared_ == 0.0)
         throw std::invalid_argument("invalid disk parameters");
 }
 double DiskKernel::hamiltonian(const VortexSystem &vortices) const {
@@ -233,8 +261,7 @@ void DiskKernel::evaluateRange(const std::vector<double> &x, const std::vector<d
                                const std::vector<double> &circulation, VelocityField &velocity,
                                std::size_t begin, std::size_t end) const {
     const std::size_t count = x.size();
-    if (y.size() != count || circulation.size() != count)
-        throw std::invalid_argument("vortex arrays have different lengths");
+    validateVortexArrays(x, y, circulation);
     if (begin > end || end > count)
         throw std::out_of_range("invalid target-vortex range");
     for (std::size_t i = 0; i < count; ++i)
@@ -262,17 +289,18 @@ void DiskKernel::evaluateRange(const std::vector<double> &x, const std::vector<d
                 u -= coefficient * dy;
                 v += coefficient * dx;
             }
-            const double sourceRadiusSquared = x[source] * x[source] + y[source] * y[source];
-            if (sourceRadiusSquared == 0.0)
-                continue;
-            // Circle inversion: z_image = R^2 / conjugate(z_source), circulation -Gamma.
-            const double imageScale = radiusSquared_ / sourceRadiusSquared;
-            const double dxImage = x[target] - imageScale * x[source];
-            const double dyImage = y[target] - imageScale * y[source];
-            const double imageDenominator = dxImage * dxImage + dyImage * dyImage;
-            const double imageCoefficient = -inverseTwoPi * circulation[source] / imageDenominator;
-            u -= imageCoefficient * dyImage;
-            v += imageCoefficient * dxImage;
+            // Evaluate the image contribution without constructing an inverse point.
+            // This stays finite when a source is at or extremely close to the center.
+            const double tx = x[target] / radius_, ty = y[target] / radius_;
+            const double sx = x[source] / radius_, sy = y[source] / radius_;
+            const double a = 1.0 - (tx * sx + ty * sy);
+            const double b = ty * sx - tx * sy;
+            const double denominator = a * a + b * b;
+            const double imageX = -a * sx - b * sy;
+            const double imageY = -a * sy + b * sx;
+            const double coefficient = -inverseTwoPi * circulation[source] / radius_ / denominator;
+            u -= coefficient * imageY;
+            v += coefficient * imageX;
         }
         velocity.x[target] = u;
         velocity.y[target] = v;

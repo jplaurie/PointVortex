@@ -1,7 +1,9 @@
 #include "checkpoint.h"
+#include <charconv>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #if defined(__unix__) || defined(__APPLE__)
@@ -10,7 +12,7 @@
 #endif
 namespace {
 constexpr const char *checkpointMagic = "POINT_VORTEX_CHECKPOINT";
-constexpr unsigned checkpointVersion = 4;
+constexpr unsigned checkpointVersion = 5;
 const char *integratorName(IntegratorKind kind) {
     return kind == IntegratorKind::rk4 ? "rk4" : "dopri5";
 }
@@ -52,7 +54,7 @@ void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem 
                      double geometryLengthY, int periodicImageLayers, bool dipoleRemoval,
                      double dipoleRemovalDistance, ReinjectionMode dipoleReinjection,
                      const DipoleEventState &dipoleState, const Invariants &segmentInvariants,
-                     bool overwrite) {
+                     const OutputSchedule &outputSchedule, bool overwrite) {
     vortices.validate();
     std::filesystem::create_directories(directory);
     const auto destination = checkpointPath(directory, outputIndex);
@@ -70,6 +72,10 @@ void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem 
         output << "time " << time << '\n';
         output << "suggested_time_step " << suggestedTimeStep << '\n';
         output << "next_output_time " << nextOutputTime << '\n';
+        output << "output_schedule " << outputSchedule.trajectoryInterval << ' '
+               << outputSchedule.diagnosticsInterval << ' ' << outputSchedule.checkpointInterval
+               << ' ' << outputSchedule.nextDiagnosticsTime << ' '
+               << outputSchedule.nextCheckpointTime << '\n';
         output << "accepted_steps " << acceptedSteps << '\n';
         output << "output_index " << outputIndex << '\n';
         output << "core_radius " << coreRadius << '\n';
@@ -106,8 +112,6 @@ void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem 
     }
     ::close(fileDescriptor);
 #endif
-    if (overwrite && std::filesystem::exists(destination))
-        std::filesystem::remove(destination);
     std::filesystem::rename(temporary, destination);
 #if defined(__unix__) || defined(__APPLE__)
     const int directoryDescriptor = ::open(directory.c_str(), O_RDONLY | O_DIRECTORY);
@@ -133,16 +137,34 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename) {
         if (!(input >> key) || key != expected)
             throw std::runtime_error(std::string("checkpoint is missing field: ") + expected);
     };
+    const auto readSize = [&]() {
+        std::string token;
+        std::size_t value = 0;
+        if (!(input >> token))
+            throw std::runtime_error("checkpoint has a missing integer");
+        const auto result = std::from_chars(token.data(), token.data() + token.size(), value);
+        if (result.ec != std::errc{} || result.ptr != token.data() + token.size())
+            throw std::runtime_error("checkpoint has an invalid non-negative integer");
+        return value;
+    };
     require("time");
     input >> c.time;
     require("suggested_time_step");
     input >> c.suggestedTimeStep;
     require("next_output_time");
     input >> c.nextOutputTime;
+    if (fileVersion >= 5) {
+        require("output_schedule");
+        auto &schedule = c.outputSchedule;
+        input >> schedule.trajectoryInterval >> schedule.diagnosticsInterval >>
+            schedule.checkpointInterval >> schedule.nextDiagnosticsTime >>
+            schedule.nextCheckpointTime;
+        c.hasOutputSchedule = true;
+    }
     require("accepted_steps");
-    input >> c.acceptedSteps;
+    c.acceptedSteps = readSize();
     require("output_index");
-    input >> c.outputIndex;
+    c.outputIndex = readSize();
     require("core_radius");
     input >> c.coreRadius;
     require("integrator");
@@ -159,7 +181,8 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename) {
         input >> c.dipoleRemoval >> c.dipoleRemovalDistance >> reinjection;
         c.dipoleReinjection = parseReinjection(reinjection);
         require("dipole_counts");
-        input >> c.dipoleState.removedPairs >> c.dipoleState.reinjectedPairs;
+        c.dipoleState.removedPairs = readSize();
+        c.dipoleState.reinjectedPairs = readSize();
         require("random_engine_state");
         std::getline(input >> std::ws, c.dipoleState.randomEngineState);
     }
@@ -175,19 +198,49 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename) {
         c.hasSegmentInvariants = true;
     }
     require("vortex_count");
-    input >> count;
+    count = readSize();
     require("vortices");
-    c.vortices.resize(count);
-    for (std::size_t i = 0; i < count; ++i)
-        input >> c.vortices.x[i] >> c.vortices.y[i] >> c.vortices.circulation[i];
+    // Do not allocate a corrupt declared population before checking that rows exist.
+    for (std::size_t i = 0; i < count; ++i) {
+        double x, y, gamma;
+        if (!(input >> x >> y >> gamma))
+            throw std::runtime_error("checkpoint vortex data is truncated or invalid");
+        c.vortices.x.push_back(x);
+        c.vortices.y.push_back(y);
+        c.vortices.circulation.push_back(gamma);
+    }
+    std::string trailing;
+    if (input >> trailing)
+        throw std::runtime_error("checkpoint contains unexpected trailing data");
+    if (input.bad())
+        throw std::runtime_error("failed while reading checkpoint");
+    input.clear();
     if (!input || !std::isfinite(c.time) || c.time < 0.0 || !std::isfinite(c.suggestedTimeStep) ||
         !(c.suggestedTimeStep > 0.0) || !std::isfinite(c.nextOutputTime) ||
         !(c.nextOutputTime > c.time) || !std::isfinite(c.coreRadius) || c.coreRadius < 0.0)
         throw std::runtime_error("checkpoint is truncated or invalid");
+    if (c.hasOutputSchedule) {
+        const auto &schedule = c.outputSchedule;
+        for (double interval : {schedule.trajectoryInterval, schedule.diagnosticsInterval,
+                                schedule.checkpointInterval})
+            if (!std::isfinite(interval) || !(interval > 0.0))
+                throw std::runtime_error("checkpoint has invalid output intervals");
+        for (double next : {schedule.nextDiagnosticsTime, schedule.nextCheckpointTime})
+            if (!std::isfinite(next) || !(next > c.time))
+                throw std::runtime_error("checkpoint has invalid output schedule");
+    }
     if (fileVersion >= 3 &&
         ((!std::isfinite(c.dipoleRemovalDistance) || c.dipoleRemovalDistance <= 0.0) ||
          c.dipoleState.randomEngineState.empty()))
         throw std::runtime_error("checkpoint has invalid dipole-removal state");
+    for (const auto &invariants : {c.initialInvariants, c.segmentInvariants})
+        for (double value :
+             {invariants.circulation, invariants.linearImpulseX, invariants.linearImpulseY,
+              invariants.angularImpulse, invariants.hamiltonian})
+            if (!std::isfinite(value))
+                throw std::runtime_error("checkpoint contains non-finite invariants");
+    if (c.dipoleState.reinjectedPairs > c.dipoleState.removedPairs)
+        throw std::runtime_error("checkpoint has invalid dipole event counts");
     for (std::size_t i = 0; i < count; ++i)
         if (!std::isfinite(c.vortices.x[i]) || !std::isfinite(c.vortices.y[i]) ||
             !std::isfinite(c.vortices.circulation[i]))

@@ -21,6 +21,12 @@
 
 namespace {
 
+bool sameFile(const std::filesystem::path &left, const std::filesystem::path &right) {
+    return std::filesystem::weakly_canonical(left) == std::filesystem::weakly_canonical(right) ||
+           (std::filesystem::exists(left) && std::filesystem::exists(right) &&
+            std::filesystem::equivalent(left, right));
+}
+
 struct GeometryMetadata {
     double lengthX = 0.0;
     double lengthY = 0.0;
@@ -94,6 +100,8 @@ int main(int argc, char **argv) {
     try {
         backendInitialize(argc, argv);
         backendInitialized = true;
+        if (argc > 2)
+            throw std::invalid_argument("expected at most one parameter file argument");
         const std::string parameterFile = argc > 1 ? argv[1] : "params.txt";
         const SimParams params = loadParams(parameterFile);
 
@@ -126,7 +134,57 @@ int main(int argc, char **argv) {
         RungeKuttaIntegrator integrator(vortices.size());
         VelocityField velocity(vortices.size());
 
+        double time = restarting ? restart.time : 0.0;
+        if (time > params.endTime)
+            throw std::runtime_error("checkpoint time is later than endTime");
+        double dt =
+            restarting
+                ? restart.suggestedTimeStep
+                : (params.integrator == IntegratorKind::dopri5
+                       ? std::clamp(params.timeStep, params.minimumTimeStep, params.maximumTimeStep)
+                       : params.timeStep);
+        // Preserve saved schedules when the interval is unchanged. A changed interval
+        // starts a new cadence from the restart time. Legacy checkpoints have one clock.
+        const auto nextTime = [&](double interval, double savedInterval, double savedNext) {
+            const double next =
+                restarting && interval == savedInterval ? savedNext : time + interval;
+            if (!std::isfinite(next) || !(next > time))
+                throw std::runtime_error("output interval cannot advance simulation time");
+            return next;
+        };
+        const auto &saved = restart.outputSchedule;
+        const bool savedSchedule = restarting && restart.hasOutputSchedule;
+        double nextOutput = nextTime(params.outputTime,
+                                     savedSchedule ? saved.trajectoryInterval : params.outputTime,
+                                     restart.nextOutputTime);
+        OutputSchedule schedule{
+            params.outputTime, params.diagnosticsInterval(), params.checkpointInterval(),
+            nextTime(params.diagnosticsInterval(),
+                     savedSchedule ? saved.diagnosticsInterval : params.outputTime,
+                     savedSchedule ? saved.nextDiagnosticsTime : restart.nextOutputTime),
+            nextTime(params.checkpointInterval(),
+                     savedSchedule ? saved.checkpointInterval : params.outputTime,
+                     savedSchedule ? saved.nextCheckpointTime : restart.nextOutputTime)};
+        std::size_t acceptedSteps = restarting ? restart.acceptedSteps : 0;
+        // The filename index counts checkpoints, independently of CSV frames.
+        std::size_t outputIndex = restarting ? restart.outputIndex : 0;
+
+        const auto protectInput = [&](const std::filesystem::path &destination) {
+            for (const auto &input :
+                 {parameterFile, params.initialConditionFile, params.restartFile})
+                if (!input.empty() && sameFile(destination, input))
+                    throw std::runtime_error("output path would overwrite input file: " + input);
+        };
+        const auto checkCheckpointDestination = [&](std::size_t index) {
+            const auto destination = checkpointPath(params.checkpointDirectory, index);
+            protectInput(destination);
+            if (sameFile(destination, params.outputFile) ||
+                sameFile(destination, params.diagnosticsFile))
+                throw std::runtime_error("checkpoint and CSV output paths must be different");
+        };
         // Detect the common rerun/restart collision before opening and possibly truncating CSVs.
+        if (restarting && restart.outputIndex == std::numeric_limits<std::size_t>::max())
+            throw std::runtime_error("checkpoint index overflow");
         const std::size_t firstCheckpointIndex = restarting ? restart.outputIndex + 1 : 0;
         if (backendIsRoot() && (!restarting || restart.time < params.endTime) &&
             !params.overwriteCheckpoints) {
@@ -139,31 +197,43 @@ int main(int argc, char **argv) {
         std::unique_ptr<TrajectoryWriter> trajectory;
         std::unique_ptr<DiagnosticsWriter> diagnostics;
         if (backendIsRoot()) {
+            // Check both CSV destinations before either writer can truncate a file.
+            const auto trajectoryPath = std::filesystem::weakly_canonical(params.outputFile);
+            const auto diagnosticsPath = std::filesystem::weakly_canonical(params.diagnosticsFile);
+            if (sameFile(trajectoryPath, diagnosticsPath))
+                throw std::runtime_error("outputFile and diagnosticsFile must be different");
+            protectInput(trajectoryPath);
+            protectInput(diagnosticsPath);
+            checkCheckpointDestination(firstCheckpointIndex);
+            if (!params.overwriteOutput) {
+                for (const auto &path : {trajectoryPath, diagnosticsPath})
+                    if (std::filesystem::exists(path))
+                        throw std::runtime_error("refusing to overwrite output file: " +
+                                                 path.string());
+            }
             trajectory =
                 std::make_unique<TrajectoryWriter>(params.outputFile, params.overwriteOutput);
             diagnostics = std::make_unique<DiagnosticsWriter>(params.diagnosticsFile, initial,
                                                               params.overwriteOutput);
-            std::cout << "backend=" << backendName() << '\n';
+            std::cout << "backend=" << backendName() << '\n'
+                      << "trajectory="
+                      << std::filesystem::absolute(params.outputFile).lexically_normal()
+                      << " interval=" << schedule.trajectoryInterval << '\n'
+                      << "diagnostics="
+                      << std::filesystem::absolute(params.diagnosticsFile).lexically_normal()
+                      << " interval=" << schedule.diagnosticsInterval << '\n'
+                      << "checkpoints="
+                      << std::filesystem::absolute(params.checkpointDirectory).lexically_normal()
+                      << " interval=" << schedule.checkpointInterval << '\n'
+                      << std::flush;
         }
 
-        double time = restarting ? restart.time : 0.0;
-        double dt = restarting
-                        ? restart.suggestedTimeStep
-                        : (params.integrator == IntegratorKind::dopri5
-                               ? std::clamp(params.timeStep, params.minimumTimeStep,
-                                            params.maximumTimeStep)
-                               : params.timeStep);
-        double nextOutput = restarting ? restart.nextOutputTime : params.outputTime;
-        std::size_t acceptedSteps = restarting ? restart.acceptedSteps : 0;
-        std::size_t outputIndex = restarting ? restart.outputIndex : 0;
-
-        if (time > params.endTime)
-            throw std::runtime_error("checkpoint time is later than endTime");
-
-        const auto writeFrame = [&] {
+        const auto writeTrajectory = [&] {
             kernel->evaluate(vortices, velocity);
             if (backendIsRoot())
                 trajectory->write(time, vortices, velocity);
+        };
+        const auto writeDiagnostics = [&] {
             const Invariants current = computeInvariants(vortices, *kernel);
             const DipoleEventState eventState = dipoles.state();
             if (backendIsRoot()) {
@@ -175,24 +245,32 @@ int main(int argc, char **argv) {
             }
         };
         const auto writeCurrentCheckpoint = [&] {
-            if (backendIsRoot())
+            if (backendIsRoot()) {
+                checkCheckpointDestination(outputIndex);
                 writeCheckpoint(params.checkpointDirectory, vortices, initial, time, dt, nextOutput,
                                 acceptedSteps, outputIndex, params.coreRadius, params.integrator,
                                 params.boundaryCondition, geometry.lengthX, geometry.lengthY,
                                 geometry.imageLayers, params.dipoleRemoval,
                                 params.dipoleRemovalDistance, params.dipoleReinjection,
-                                dipoles.state(), segmentReference, params.overwriteCheckpoints);
+                                dipoles.state(), segmentReference, schedule,
+                                params.overwriteCheckpoints);
+            }
         };
 
         // A restarted branch records its starting frame but does not duplicate its source
         // checkpoint.
-        writeFrame();
+        writeTrajectory();
+        writeDiagnostics();
         if (!restarting)
             writeCurrentCheckpoint();
 
         while (time < params.endTime) {
-            // Clipping to both boundaries makes CSV and checkpoint times exactly reproducible.
-            const double stepSize = std::min({dt, params.endTime - time, nextOutput - time});
+            // Land on the next event from any output stream, or the final time.
+            const double stepSize =
+                std::min({dt, params.endTime - time, nextOutput - time,
+                          schedule.nextDiagnosticsTime - time, schedule.nextCheckpointTime - time});
+            if (!(time + stepSize > time))
+                throw std::runtime_error("timestep cannot advance simulation time");
             double acceptedStep = stepSize;
 
             if (params.integrator == IntegratorKind::rk4) {
@@ -204,7 +282,11 @@ int main(int argc, char **argv) {
                 dt = result.suggestedTimeStep;
             }
 
+            if (!std::isfinite(acceptedStep) || !(time + acceptedStep > time))
+                throw std::runtime_error("accepted timestep cannot advance simulation time");
             time += acceptedStep;
+            if (acceptedSteps == std::numeric_limits<std::size_t>::max())
+                throw std::runtime_error("accepted-step counter overflow");
             ++acceptedSteps;
             if (dipoles.process(vortices) != 0) {
                 integrator.invalidateCachedDerivative();
@@ -212,12 +294,36 @@ int main(int argc, char **argv) {
             }
 
             const double roundingSlack =
-                16.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, std::abs(time));
-            if (time + roundingSlack >= nextOutput || time + roundingSlack >= params.endTime) {
-                while (nextOutput <= time + roundingSlack)
-                    nextOutput += params.outputTime;
+                16.0 * std::numeric_limits<double>::epsilon() * std::abs(time);
+            const bool finalFrame = time + roundingSlack >= params.endTime;
+            if (finalFrame)
+                time = params.endTime; // Avoid two final frames separated only by roundoff.
+            const bool trajectoryDue = time + roundingSlack >= nextOutput;
+            const bool diagnosticsDue = time + roundingSlack >= schedule.nextDiagnosticsTime;
+            const bool checkpointDue = time + roundingSlack >= schedule.nextCheckpointTime;
+            const auto advance = [&](double &next, double interval) {
+                do {
+                    const double following = next + interval;
+                    if (!std::isfinite(following) || !(following > next))
+                        throw std::runtime_error("output interval cannot advance simulation time");
+                    next = following;
+                } while (next <= time);
+            };
+            // Advance every due clock before saving it, including coincident events.
+            if (trajectoryDue)
+                advance(nextOutput, schedule.trajectoryInterval);
+            if (diagnosticsDue)
+                advance(schedule.nextDiagnosticsTime, schedule.diagnosticsInterval);
+            if (checkpointDue)
+                advance(schedule.nextCheckpointTime, schedule.checkpointInterval);
+            if (trajectoryDue || finalFrame)
+                writeTrajectory();
+            if (diagnosticsDue || finalFrame)
+                writeDiagnostics();
+            if (checkpointDue || finalFrame) {
+                if (outputIndex == std::numeric_limits<std::size_t>::max())
+                    throw std::runtime_error("checkpoint index overflow");
                 ++outputIndex;
-                writeFrame();
                 writeCurrentCheckpoint();
             }
         }

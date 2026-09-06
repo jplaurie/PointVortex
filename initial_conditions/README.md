@@ -47,3 +47,8 @@ initialConditionFile data/initial_n400.dat
 
 The generated file can then be used unchanged by CPU, MPI, or CUDA. The driver rejects geometry
 and domain-size mismatches before starting a simulation.
+
+Missing output directories are created automatically. Existing files require `--overwrite` to
+replace them. The `single` case places a vortex at the origin; it is stationary in the infinite
+plane and at the disk center, and is rejected for periodic geometry. For an off-center disk
+orbit, supply a hand-written single-vortex file instead.

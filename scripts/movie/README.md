@@ -57,3 +57,10 @@ The trajectory must be ordered by output time, as produced by PointVortex.
 Positive and negative vortices are drawn in red and blue respectively. Rows
 with zero circulation are not displayed. Plot text is rendered with LaTeX and
 Computer Modern serif fonts.
+
+Only nonempty trajectory frames can be rendered. Once the last vortex is removed there are no
+further trajectory rows to animate. An empty selection is rejected before opening the movie
+output. The movie output path must differ from the input CSV path.
+
+`script_movie_disc.py` is a historical example for legacy numbered snapshots, with hard-coded
+paths. Use `make_vortex_movie.py` for current solver CSV output.

@@ -1,4 +1,6 @@
 #include "backend.h"
+#include <iostream>
+#include <limits>
 #include <mpi.h>
 #include <stdexcept>
 
@@ -15,6 +17,8 @@ class MpiKernel final : public VelocityKernel {
                        std::size_t begin, std::size_t end) const override {
         if (begin > end || end > x.size())
             throw std::out_of_range("invalid target-vortex range");
+        if (x.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+            throw std::invalid_argument("MPI vortex count exceeds the supported MPI count range");
         const std::size_t targets = end - begin;
         const std::size_t localBegin =
             begin + targets * static_cast<std::size_t>(rank) / static_cast<std::size_t>(ranks);
@@ -50,10 +54,24 @@ class MpiKernel final : public VelocityKernel {
 void backendInitialize(int &argc, char **&argv) {
     int initialized = 0;
     MPI_Initialized(&initialized);
+    int provided = MPI_THREAD_SINGLE;
+#ifdef _OPENMP
+    constexpr int required = MPI_THREAD_FUNNELED;
+#else
+    constexpr int required = MPI_THREAD_SINGLE;
+#endif
     if (!initialized)
-        MPI_Init(&argc, &argv);
+        MPI_Init_thread(&argc, &argv, required, &provided);
+    else
+        MPI_Query_thread(&provided);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &ranks);
+    if (provided < required) {
+        if (rank == 0)
+            std::cerr << "error: MPI runtime lacks the thread support required by this build\n";
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        throw std::runtime_error("insufficient MPI thread support");
+    }
 }
 void backendFinalize() {
     int finalized = 0;

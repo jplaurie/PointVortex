@@ -4,6 +4,9 @@ N 400
 timeStep 0.001
 endTime 1.0
 outputTime 0.01
+# Optional independent intervals; when omitted each follows outputTime.
+# diagnosticsTime 0.005
+# checkpointTime 0.1
 coreRadius 0.0
 integrator dopri5
 absoluteTolerance 1e-10
@@ -21,6 +24,8 @@ diskRadius 1.0
 # Remove close opposite-sign pairs after every accepted timestep. Reinjection modes are
 # none, independent, or paired; reinjection is available only for periodic and disk domains.
 dipoleRemoval true
+# Full dipole separation threshold. In a disk this is the real/image distance;
+# the image is implicit and is not written as a second vortex.
 dipoleRemovalDistance 0.02
 dipoleReinjection paired
 # Optional: a whitespace- or comma-separated file with x, y, circulation per line.

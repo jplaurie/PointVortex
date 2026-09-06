@@ -29,6 +29,8 @@ void RungeKuttaIntegrator::makeStage(double dt, std::size_t stage,
     }
 }
 void RungeKuttaIntegrator::rk4Step(VortexSystem &state, double dt, const VelocityKernel &kernel) {
+    if (!std::isfinite(dt) || !(dt > 0.0))
+        throw std::invalid_argument("timestep must be finite and positive");
     ensureSize(state);
     initial_.x = state.x;
     initial_.y = state.y;
@@ -44,18 +46,23 @@ void RungeKuttaIntegrator::rk4Step(VortexSystem &state, double dt, const Velocit
     makeStage(dt, 3, a4);
     kernel.evaluate(temporary_.x, temporary_.y, state.circulation, stages_[3]);
     for (std::size_t i = 0; i < state.size(); ++i) {
-        state.x[i] = initial_.x[i] + dt *
-                                         (stages_[0].x[i] + 2.0 * stages_[1].x[i] +
-                                          2.0 * stages_[2].x[i] + stages_[3].x[i]) /
-                                         6.0;
-        state.y[i] = initial_.y[i] + dt *
-                                         (stages_[0].y[i] + 2.0 * stages_[1].y[i] +
-                                          2.0 * stages_[2].y[i] + stages_[3].y[i]) /
-                                         6.0;
+        temporary_.x[i] = initial_.x[i] + dt *
+                                              (stages_[0].x[i] + 2.0 * stages_[1].x[i] +
+                                               2.0 * stages_[2].x[i] + stages_[3].x[i]) /
+                                              6.0;
+        temporary_.y[i] = initial_.y[i] + dt *
+                                              (stages_[0].y[i] + 2.0 * stages_[1].y[i] +
+                                               2.0 * stages_[2].y[i] + stages_[3].y[i]) /
+                                              6.0;
     }
+    validateVortexArrays(temporary_.x, temporary_.y, state.circulation);
+    state.x.swap(temporary_.x);
+    state.y.swap(temporary_.y);
 }
 StepResult RungeKuttaIntegrator::dopri5Step(VortexSystem &state, double dt,
                                             const VelocityKernel &kernel, const SimParams &p) {
+    if (!std::isfinite(dt) || !(dt > 0.0))
+        throw std::invalid_argument("timestep must be finite and positive");
     ensureSize(state);
     initial_.x = state.x;
     initial_.y = state.y;
@@ -83,24 +90,25 @@ StepResult RungeKuttaIntegrator::dopri5Step(VortexSystem &state, double dt,
         }
         double error = 0.0;
         for (std::size_t i = 0; i < state.size(); ++i) {
-            double x5 = initial_.x[i], y5 = initial_.y[i];
-            double x4 = initial_.x[i], y4 = initial_.y[i];
+            // Stage 7 was evaluated at the fifth-order solution. Accept exactly
+            // that state so the cached FSAL derivative belongs to the saved positions.
+            const double x5 = temporary_.x[i], y5 = temporary_.y[i];
+            double xError = 0.0, yError = 0.0;
             for (std::size_t s = 0; s < 7; ++s) {
-                x5 += dt * b5[s] * stages_[s].x[i];
-                y5 += dt * b5[s] * stages_[s].y[i];
-                x4 += dt * b4[s] * stages_[s].x[i];
-                y4 += dt * b4[s] * stages_[s].y[i];
+                xError += dt * (b5[s] - b4[s]) * stages_[s].x[i];
+                yError += dt * (b5[s] - b4[s]) * stages_[s].y[i];
             }
-            temporary_.x[i] = x5;
-            temporary_.y[i] = y5;
             const double xScale =
                 p.absoluteTolerance +
                 p.relativeTolerance * std::max(std::abs(initial_.x[i]), std::abs(x5));
             const double yScale =
                 p.absoluteTolerance +
                 p.relativeTolerance * std::max(std::abs(initial_.y[i]), std::abs(y5));
-            error = std::max(error, std::abs(x5 - x4) / xScale);
-            error = std::max(error, std::abs(y5 - y4) / yScale);
+            if (!std::isfinite(xError) || !std::isfinite(yError) || !std::isfinite(xScale) ||
+                !std::isfinite(yScale) || !(xScale > 0.0) || !(yScale > 0.0))
+                throw std::runtime_error("non-finite adaptive error estimate or invalid tolerance");
+            error = std::max(error, std::abs(xError) / xScale);
+            error = std::max(error, std::abs(yError) / yScale);
         }
         const double factor =
             error == 0.0 ? 5.0 : std::clamp(0.9 * std::pow(error, -0.2), 0.2, 5.0);

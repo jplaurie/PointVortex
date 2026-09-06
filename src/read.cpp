@@ -36,6 +36,15 @@ int parseInt(const std::string &value) {
 } // namespace
 
 void SimParams::validate() const {
+    for (double value : {timeStep, endTime, outputTime, coreRadius, absoluteTolerance,
+                         relativeTolerance, minimumTimeStep, maximumTimeStep, boxLengthX,
+                         boxLengthY, diskRadius, dipoleRemovalDistance})
+        if (!std::isfinite(value))
+            throw std::invalid_argument("simulation parameters must be finite");
+    for (double radius : {coreRadius, diskRadius, dipoleRemovalDistance})
+        if (!std::isfinite(radius * radius) || (radius > 0.0 && radius * radius == 0.0))
+            throw std::invalid_argument(
+                "radius or distance is outside the supported numeric range");
     if (vortexCount == 0 && initialConditionFile.empty() && restartFile.empty())
         throw std::invalid_argument("N must be positive");
     if (!(timeStep > 0.0))
@@ -44,6 +53,10 @@ void SimParams::validate() const {
         throw std::invalid_argument("endTime must be non-negative");
     if (!(outputTime > 0.0))
         throw std::invalid_argument("outputTime must be positive");
+    if (!std::isfinite(outputTime) || !std::isfinite(diagnosticsInterval()) ||
+        !(diagnosticsInterval() > 0.0) || !std::isfinite(checkpointInterval()) ||
+        !(checkpointInterval() > 0.0))
+        throw std::invalid_argument("output intervals must be finite and positive");
     if (!(coreRadius >= 0.0))
         throw std::invalid_argument("coreRadius must be non-negative");
     if (!(absoluteTolerance > 0.0) || !(relativeTolerance >= 0.0))
@@ -112,6 +125,10 @@ SimParams loadParams(const std::string &filename) {
                 legacyNumSteps = parseUnsigned(value);
             else if (key == "outputTime" || key == "OutputTime")
                 p.outputTime = parseDouble(value);
+            else if (key == "diagnosticsTime")
+                p.diagnosticsTime = parseDouble(value);
+            else if (key == "checkpointTime")
+                p.checkpointTime = parseDouble(value);
             else if (key == "coreRadius")
                 p.coreRadius = parseDouble(value);
             else if (key == "coreSize")
@@ -192,6 +209,8 @@ SimParams loadParams(const std::string &filename) {
                                      e.what());
         }
     }
+    if (input.bad())
+        throw std::runtime_error("failed while reading parameter file: " + filename);
     if (legacyNumSteps && !explicitEndTime)
         p.endTime = p.timeStep * static_cast<double>(*legacyNumSteps);
     p.validate();
@@ -214,9 +233,10 @@ VortexSystem loadVortices(const std::string &filename) {
                 character = ' ';
         std::istringstream fields(line);
         double x, y, circulation;
-        if (!(fields >> x))
+        fields >> std::ws;
+        if (fields.eof())
             continue;
-        if (!(fields >> y >> circulation))
+        if (!(fields >> x >> y >> circulation))
             throw std::runtime_error("invalid initial condition on line " +
                                      std::to_string(lineNumber));
         std::string trailing;
@@ -228,6 +248,8 @@ VortexSystem loadVortices(const std::string &filename) {
         vortices.y.push_back(y);
         vortices.circulation.push_back(circulation);
     }
+    if (input.bad())
+        throw std::runtime_error("failed while reading initial-condition file: " + filename);
     if (vortices.size() == 0)
         throw std::runtime_error("initial-condition file is empty");
     return vortices;

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+from itertools import chain
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -87,6 +88,8 @@ def trajectory_frames(path: Path) -> Iterator[tuple[float, list[float], list[flo
             if not all(math.isfinite(value) for value in (time, row_x, row_y, gamma)):
                 raise ValueError(f"non-finite numeric value on CSV row {row_number}")
 
+            if current_time is not None and time < current_time:
+                raise ValueError(f"output times decrease on CSV row {row_number}")
             if current_time is not None and time != current_time:
                 yield current_time, x, y, circulation
                 x, y, circulation = [], [], []
@@ -141,6 +144,12 @@ def main() -> None:
     args = parse_arguments()
     if not args.input.is_file():
         raise FileNotFoundError(f"trajectory file not found: {args.input}")
+    if args.input.resolve() == args.output.resolve():
+        raise ValueError("movie output must differ from the trajectory input")
+    frames = iter(selected_frames(args.input, args.start, args.stop, args.stride))
+    first_frame = next(frames, None)
+    if first_frame is None:
+        raise ValueError("no trajectory frames selected; the file may contain no surviving vortices")
     if shutil.which("latex") is None:
         raise RuntimeError("LaTeX executable not found; install LaTeX to render plot text")
     if not FFMpegWriter.isAvailable():
@@ -184,9 +193,7 @@ def main() -> None:
     frame_count = 0
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with writer.saving(figure, str(args.output), args.dpi):
-        for frame_index, (time, x, y, circulation) in selected_frames(
-            args.input, args.start, args.stop, args.stride
-        ):
+        for frame_index, (time, x, y, circulation) in chain((first_frame,), frames):
             if args.geometry == "periodic":
                 x = wrap_periodic(x, args.box_length)
                 y = wrap_periodic(y, args.box_length)
@@ -207,9 +214,6 @@ def main() -> None:
             print(f"frame {frame_index}: time={time:.9g}")
 
     plt.close(figure)
-    if frame_count == 0:
-        args.output.unlink(missing_ok=True)
-        raise ValueError("no frames selected")
     print(f"wrote {frame_count} frames to {args.output}")
 
 

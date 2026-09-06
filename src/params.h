@@ -2,6 +2,7 @@
 #define POINT_VORTEX_PARAMS_H
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 enum class IntegratorKind { rk4, dopri5 };
 enum class ReinjectionMode { none, independent, paired };
@@ -11,6 +12,13 @@ struct SimParams {
     double timeStep = 1.0e-3;
     double endTime = 1.0;
     double outputTime = 0.1;
+    // Unset intervals follow outputTime, preserving existing parameter files.
+    std::optional<double> diagnosticsTime;
+    std::optional<double> checkpointTime;
+    [[nodiscard]] double diagnosticsInterval() const {
+        return diagnosticsTime.value_or(outputTime);
+    }
+    [[nodiscard]] double checkpointInterval() const { return checkpointTime.value_or(outputTime); }
     double coreRadius = 0.0;
     double absoluteTolerance = 1.0e-10;
     double relativeTolerance = 1.0e-8;

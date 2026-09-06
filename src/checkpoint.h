@@ -6,6 +6,13 @@
 #include "vortex.h"
 #include <cstddef>
 #include <filesystem>
+struct OutputSchedule {
+    double trajectoryInterval = 0.0;
+    double diagnosticsInterval = 0.0;
+    double checkpointInterval = 0.0;
+    double nextDiagnosticsTime = 0.0;
+    double nextCheckpointTime = 0.0;
+};
 struct Checkpoint {
     // Restart state includes output/integrator progress as well as vortex data.
     VortexSystem vortices;
@@ -15,6 +22,8 @@ struct Checkpoint {
     double time = 0.0;
     double suggestedTimeStep = 0.0;
     double nextOutputTime = 0.0;
+    bool hasOutputSchedule = false;
+    OutputSchedule outputSchedule;
     std::size_t acceptedSteps = 0;
     std::size_t outputIndex = 0;
     double coreRadius = 0.0;
@@ -37,7 +46,7 @@ void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem 
                      double geometryLengthY, int periodicImageLayers, bool dipoleRemoval,
                      double dipoleRemovalDistance, ReinjectionMode dipoleReinjection,
                      const DipoleEventState &dipoleState, const Invariants &segmentInvariants,
-                     bool overwrite = false);
+                     const OutputSchedule &outputSchedule, bool overwrite = false);
 std::filesystem::path checkpointPath(const std::filesystem::path &directory,
                                      std::size_t outputIndex);
 #endif
