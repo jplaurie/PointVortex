@@ -54,7 +54,6 @@ and dipole removal/reinjection.
 ├── scripts/
 │   ├── analysis/         Jupyter notebook for diagnostics and configuration figures
 │   └── movie/            CSV-to-MP4 renderer
-├── archive/              Historical implementations; not part of the active build
 ├── runs/                 Generated managed run output (ignored by Git)
 ├── CMakeLists.txt        Primary cross-platform build configuration
 ├── Makefile              Lightweight alternative build workflow
