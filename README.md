@@ -326,6 +326,4 @@ dependencies are installed.
 - Periodic dynamics currently requires a square, zero-net-circulation domain.
 - Core regularization is available only for the infinite plane.
 - Singular encounters, disk-boundary violations, and non-finite states stop the run.
-- `archive/` and legacy plotting scripts are retained for history and are not part of the active,
-  tested workflow.
 
