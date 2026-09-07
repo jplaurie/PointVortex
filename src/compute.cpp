@@ -32,7 +32,8 @@ InfinitePlaneKernel::InfinitePlaneKernel(double coreRadius)
     : coreRadiusSquared_(coreRadius * coreRadius) {
     if (!(coreRadius >= 0.0) || !std::isfinite(coreRadiusSquared_) ||
         (coreRadius > 0.0 && coreRadiusSquared_ == 0.0))
-        throw std::invalid_argument("core radius is negative or outside the supported numeric range");
+        throw std::invalid_argument(
+            "core radius is negative or outside the supported numeric range");
 }
 void VelocityKernel::evaluate(const VortexSystem &vortices, VelocityField &velocity) const {
     evaluate(vortices.x, vortices.y, vortices.circulation, velocity);
@@ -46,6 +47,21 @@ void VelocityKernel::evaluate(const std::vector<double> &x, const std::vector<do
     for (std::size_t i = 0; i < x.size(); ++i)
         if (!std::isfinite(velocity.x[i]) || !std::isfinite(velocity.y[i]))
             throw std::runtime_error("non-finite velocity; check scales and close encounters");
+}
+void VelocityKernel::uploadDeviceState(const VortexSystem &) const {
+    throw std::logic_error("selected backend does not support device-resident integration");
+}
+void VelocityKernel::downloadDeviceState(VortexSystem &) const {
+    throw std::logic_error("selected backend does not support device-resident integration");
+}
+void VelocityKernel::evaluateDeviceState(VelocityField &) const {
+    throw std::logic_error("selected backend does not support device-resident integration");
+}
+void VelocityKernel::deviceRk4Step(double) const {
+    throw std::logic_error("selected backend does not support device-resident integration");
+}
+DeviceStepResult VelocityKernel::deviceDopri5Step(double, double, double, double, double) const {
+    throw std::logic_error("selected backend does not support device-resident integration");
 }
 double InfinitePlaneKernel::hamiltonian(const VortexSystem &vortices) const {
     return computeInvariants(vortices, std::sqrt(coreRadiusSquared_)).hamiltonian;
@@ -100,7 +116,8 @@ Invariants computeInvariants(const VortexSystem &vortices, double coreRadius) {
     if (!(coreRadius >= 0.0) || !std::isfinite(coreRadius) ||
         !std::isfinite(coreRadius * coreRadius) ||
         (coreRadius > 0.0 && coreRadius * coreRadius == 0.0))
-        throw std::invalid_argument("core radius is negative or outside the supported numeric range");
+        throw std::invalid_argument(
+            "core radius is negative or outside the supported numeric range");
     Invariants result = computeMoments(vortices);
     const double epsilonSquared = coreRadius * coreRadius;
     for (std::size_t i = 0; i < vortices.size(); ++i) {
@@ -120,8 +137,8 @@ Invariants computeInvariants(const VortexSystem &vortices, double coreRadius) {
 }
 Invariants computeInvariants(const VortexSystem &vortices, const VelocityKernel &kernel) {
     Invariants result = computeMoments(vortices);
-    for (double value : {result.circulation, result.linearImpulseX, result.linearImpulseY,
-                         result.angularImpulse})
+    for (double value :
+         {result.circulation, result.linearImpulseX, result.linearImpulseY, result.angularImpulse})
         if (!std::isfinite(value))
             throw std::runtime_error("non-finite vortex moment; check input scales");
     result.hamiltonian = kernel.hamiltonian(vortices);

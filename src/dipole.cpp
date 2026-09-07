@@ -63,8 +63,8 @@ std::size_t DipoleManager::process(VortexSystem &vortices) {
         }
         if (params_.boundaryCondition == "disk") {
             const double radiusSquared = params_.diskRadius * params_.diskRadius;
-            const double radialSquared = vortices.x[i] * vortices.x[i] +
-                                         vortices.y[i] * vortices.y[i];
+            const double radialSquared =
+                vortices.x[i] * vortices.x[i] + vortices.y[i] * vortices.y[i];
             // The circle-theorem image has radius R^2/r. The removal parameter
             // is the full real/image dipole separation, R^2/r-r. It is not
             // exactly twice the geometric wall gap R-r for a curved wall.

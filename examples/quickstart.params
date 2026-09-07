@@ -9,8 +9,5 @@ endTime 0.1
 outputTime 0.02
 numThreads 1
 dipoleRemoval false
-outputFile data/quickstart/vortices.csv
-diagnosticsFile data/quickstart/diagnostics.csv
-checkpointDirectory data/quickstart/checkpoints
-overwriteOutput false
-overwriteCheckpoints false
+runDirectory runs/quickstart
+overwriteRun false

@@ -12,7 +12,7 @@
 #endif
 namespace {
 constexpr const char *checkpointMagic = "POINT_VORTEX_CHECKPOINT";
-constexpr unsigned checkpointVersion = 5;
+constexpr unsigned checkpointVersion = 6;
 const char *integratorName(IntegratorKind kind) {
     return kind == IntegratorKind::rk4 ? "rk4" : "dopri5";
 }
@@ -49,7 +49,7 @@ std::filesystem::path checkpointPath(const std::filesystem::path &directory,
 void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem &vortices,
                      const Invariants &initialInvariants, double time, double suggestedTimeStep,
                      double nextOutputTime, std::size_t acceptedSteps, std::size_t outputIndex,
-                     double coreRadius, IntegratorKind integrator,
+                     std::size_t eventIndex, double coreRadius, IntegratorKind integrator,
                      const std::string &boundaryCondition, double geometryLengthX,
                      double geometryLengthY, int periodicImageLayers, bool dipoleRemoval,
                      double dipoleRemovalDistance, ReinjectionMode dipoleReinjection,
@@ -78,6 +78,7 @@ void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem 
                << outputSchedule.nextCheckpointTime << '\n';
         output << "accepted_steps " << acceptedSteps << '\n';
         output << "output_index " << outputIndex << '\n';
+        output << "event_index " << eventIndex << '\n';
         output << "core_radius " << coreRadius << '\n';
         output << "integrator " << integratorName(integrator) << '\n';
         output << "geometry " << boundaryCondition << ' ' << geometryLengthX << ' '
@@ -165,6 +166,13 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename) {
     c.acceptedSteps = readSize();
     require("output_index");
     c.outputIndex = readSize();
+    if (fileVersion >= 6) {
+        require("event_index");
+        c.eventIndex = readSize();
+    } else {
+        // Earlier checkpoints did not identify every independent output event.
+        c.eventIndex = c.outputIndex;
+    }
     require("core_radius");
     input >> c.coreRadius;
     require("integrator");

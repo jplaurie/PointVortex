@@ -68,6 +68,15 @@ void dopriTest() {
     near(s.x[1], std::cos(angle), 2e-10, "DOPRI x");
     near(s.y[1], std::sin(angle), 2e-10, "DOPRI y");
 }
+void managedRunPathTest() {
+    const SimParams defaults;
+    const RunPaths paths = runPaths(defaults);
+    if (defaults.runDirectory != "runs/default" ||
+        paths.trajectory != "runs/default/trajectory.csv" ||
+        paths.diagnostics != "runs/default/diagnostics.csv" ||
+        paths.checkpoints != "runs/default/checkpoints")
+        throw std::runtime_error("managed run layout defaults failed");
+}
 void checkpointTest() {
     const auto directory =
         std::filesystem::temp_directory_path() /
@@ -78,7 +87,7 @@ void checkpointTest() {
     SimParams parameters;
     const DipoleEventState dipoleState = DipoleManager(parameters).state();
     const OutputSchedule schedule{0.1, 0.2, 0.5, 1.4, 1.5};
-    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
+    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 9, 0.0,
                     IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
                     ReinjectionMode::none, dipoleState, initial, schedule);
     const auto restored = loadCheckpoint(checkpointPath(directory, 7));
@@ -95,7 +104,7 @@ void checkpointTest() {
     near(restored.initialInvariants.hamiltonian, initial.hamiltonian, 0.0, "checkpoint invariant");
     near(restored.segmentInvariants.hamiltonian, initial.hamiltonian, 0.0,
          "checkpoint segment invariant");
-    if (restored.acceptedSteps != 42 || restored.outputIndex != 7)
+    if (restored.acceptedSteps != 42 || restored.outputIndex != 7 || restored.eventIndex != 9)
         throw std::runtime_error("checkpoint counters failed");
     if (restored.boundaryCondition != "infinite" || restored.periodicImageLayers != 8)
         throw std::runtime_error("checkpoint geometry failed");
@@ -104,7 +113,7 @@ void checkpointTest() {
         throw std::runtime_error("checkpoint dipole state failed");
     bool refusedOverwrite = false;
     try {
-        writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
+        writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 9, 0.0,
                         IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
                         ReinjectionMode::none, dipoleState, initial, schedule);
     } catch (const std::runtime_error &) {
@@ -112,7 +121,7 @@ void checkpointTest() {
     }
     if (!refusedOverwrite)
         throw std::runtime_error("checkpoint overwrite was not refused");
-    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 0.0,
+    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 9, 0.0,
                     IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
                     ReinjectionMode::none, dipoleState, initial, schedule, true);
     std::filesystem::remove_all(directory);
@@ -257,10 +266,10 @@ void diskWallDipoleRemovalTest() {
     const double imageRadius = 1.0 / radius;
     const double imageDistance = imageRadius - radius;
     const double wallGap = 1.0 - radius;
-    near(imageDistance, (1.0 - radius * radius) / radius, 1e-15,
-         "disk wall-image distance");
+    near(imageDistance, (1.0 - radius * radius) / radius, 1e-15, "disk wall-image distance");
     if (std::abs(2.0 * wallGap - imageDistance) < 1e-6)
-        throw std::runtime_error("curved-wall image distance was treated as exactly twice the wall gap");
+        throw std::runtime_error(
+            "curved-wall image distance was treated as exactly twice the wall gap");
 
     parameters.dipoleReinjection = ReinjectionMode::paired;
     state = VortexSystem(1);
@@ -379,6 +388,7 @@ int main() {
         velocityTests();
         rk4Test();
         dopriTest();
+        managedRunPathTest();
         checkpointTest();
         geometryTests();
         periodicInitializationTest();

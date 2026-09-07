@@ -4,6 +4,10 @@
 #include <mpi.h>
 #include <stdexcept>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace {
 int rank = 0;
 int ranks = 1;
@@ -82,6 +86,14 @@ void backendFinalize() {
 void backendAbort(int exitCode) { MPI_Abort(MPI_COMM_WORLD, exitCode); }
 bool backendIsRoot() { return rank == 0; }
 const char *backendName() { return "MPI"; }
+std::string backendRuntimeDetails() {
+#ifdef _OPENMP
+    return "mpi_ranks " + std::to_string(ranks) + "\nopenmp_enabled true\nopenmp_threads " +
+           std::to_string(omp_get_max_threads());
+#else
+    return "mpi_ranks " + std::to_string(ranks) + "\nopenmp_enabled false\nopenmp_threads 1";
+#endif
+}
 std::unique_ptr<VelocityKernel> makeBackendKernel(const SimParams &params) {
     return std::make_unique<MpiKernel>(makeReferenceKernel(params));
 }

@@ -1,6 +1,6 @@
 # Point-vortex movie tool
 
-`make_vortex_movie.py` reads the `vortices.csv` trajectory written by the C++
+`make_vortex_movie.py` reads the `trajectory.csv` file written by the C++
 solver and streams it into an MP4. It groups rows by `time`, so the entire
 trajectory does not need to fit in memory. The extra `index`, `u`, and `v`
 columns may be present and are ignored. The number of vortices may vary between
@@ -25,24 +25,24 @@ Run these commands from the repository root:
 
 ```bash
 # Infinite plane; the script determines fixed limits from the selected frames.
-python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
-    --geometry infinite --output data/infinite.mp4
+python3 scripts/movie/make_vortex_movie.py runs/default/trajectory.csv \
+    --geometry infinite --output runs/default/infinite.mp4
 
 # Square periodic box. Coordinates are wrapped for display only.
-python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
-    --geometry periodic --box-length 2.0 --output data/periodic.mp4
+python3 scripts/movie/make_vortex_movie.py runs/default/trajectory.csv \
+    --geometry periodic --box-length 2.0 --output runs/default/periodic.mp4
 
 # Circular disk.
-python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
-    --geometry disk --radius 1.0 --output data/disk.mp4
+python3 scripts/movie/make_vortex_movie.py runs/default/trajectory.csv \
+    --geometry disk --radius 1.0 --output runs/default/disk.mp4
 ```
 
 `--start`, `--stop`, and `--stride` select output-frame indices. For example,
 this renders frames 100 through 499, taking every second frame:
 
 ```bash
-python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
-    --geometry disk --start 100 --stop 500 --stride 2 --output data/excerpt.mp4
+python3 scripts/movie/make_vortex_movie.py runs/default/trajectory.csv \
+    --geometry disk --start 100 --stop 500 --stride 2 --output runs/default/excerpt.mp4
 ```
 
 For an infinite-plane movie, `--xlim MIN MAX` and `--ylim MIN MAX` override the

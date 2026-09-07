@@ -27,6 +27,31 @@ bool sameFile(const std::filesystem::path &left, const std::filesystem::path &ri
             std::filesystem::equivalent(left, right));
 }
 
+bool hasManagedRunOutput(const RunPaths &paths) {
+    return std::filesystem::exists(paths.trajectory) ||
+           std::filesystem::exists(paths.diagnostics) ||
+           std::filesystem::exists(paths.checkpoints) ||
+           std::filesystem::exists(paths.directory / "resolved_parameters.txt") ||
+           std::filesystem::exists(paths.directory / "segments");
+}
+
+void removeManagedRunOutput(const RunPaths &paths) {
+    std::error_code error;
+    for (const auto &path :
+         {paths.trajectory, paths.diagnostics, paths.directory / "resolved_parameters.txt"}) {
+        std::filesystem::remove(path, error);
+        if (error)
+            throw std::runtime_error("cannot remove previous run output: " + path.string() + ": " +
+                                     error.message());
+    }
+    for (const auto &path : {paths.checkpoints, paths.directory / "segments"}) {
+        std::filesystem::remove_all(path, error);
+        if (error)
+            throw std::runtime_error("cannot remove previous run output: " + path.string() + ": " +
+                                     error.message());
+    }
+}
+
 struct GeometryMetadata {
     double lengthX = 0.0;
     double lengthY = 0.0;
@@ -104,6 +129,7 @@ int main(int argc, char **argv) {
             throw std::invalid_argument("expected at most one parameter file argument");
         const std::string parameterFile = argc > 1 ? argv[1] : "params.txt";
         const SimParams params = loadParams(parameterFile);
+        const RunPaths paths = runPaths(params);
 
 #ifdef _OPENMP
         if (params.numThreads > 0)
@@ -133,6 +159,10 @@ int main(int argc, char **argv) {
                                           : computeInvariants(vortices, *kernel);
         RungeKuttaIntegrator integrator(vortices.size());
         VelocityField velocity(vortices.size());
+        const bool deviceStepping = kernel->supportsDeviceStepping();
+        bool hostStateCurrent = true;
+        if (deviceStepping)
+            kernel->uploadDeviceState(vortices);
 
         double time = restarting ? restart.time : 0.0;
         if (time > params.endTime)
@@ -168,6 +198,8 @@ int main(int argc, char **argv) {
         std::size_t acceptedSteps = restarting ? restart.acceptedSteps : 0;
         // The filename index counts checkpoints, independently of CSV frames.
         std::size_t outputIndex = restarting ? restart.outputIndex : 0;
+        // One event frame identifies a simultaneous trajectory/diagnostics/checkpoint save.
+        std::size_t eventIndex = restarting ? restart.eventIndex : 0;
 
         const auto protectInput = [&](const std::filesystem::path &destination) {
             for (const auto &input :
@@ -176,84 +208,88 @@ int main(int argc, char **argv) {
                     throw std::runtime_error("output path would overwrite input file: " + input);
         };
         const auto checkCheckpointDestination = [&](std::size_t index) {
-            const auto destination = checkpointPath(params.checkpointDirectory, index);
+            const auto destination = checkpointPath(paths.checkpoints.string(), index);
             protectInput(destination);
-            if (sameFile(destination, params.outputFile) ||
-                sameFile(destination, params.diagnosticsFile))
+            if (sameFile(destination, paths.trajectory) || sameFile(destination, paths.diagnostics))
                 throw std::runtime_error("checkpoint and CSV output paths must be different");
         };
         // Detect the common rerun/restart collision before opening and possibly truncating CSVs.
         if (restarting && restart.outputIndex == std::numeric_limits<std::size_t>::max())
             throw std::runtime_error("checkpoint index overflow");
         const std::size_t firstCheckpointIndex = restarting ? restart.outputIndex + 1 : 0;
-        if (backendIsRoot() && (!restarting || restart.time < params.endTime) &&
-            !params.overwriteCheckpoints) {
-            const auto firstCheckpoint =
-                checkpointPath(params.checkpointDirectory, firstCheckpointIndex);
-            if (std::filesystem::exists(firstCheckpoint))
-                throw std::runtime_error("refusing to overwrite checkpoint: " +
-                                         firstCheckpoint.string());
-        }
         std::unique_ptr<TrajectoryWriter> trajectory;
         std::unique_ptr<DiagnosticsWriter> diagnostics;
         if (backendIsRoot()) {
-            // Check both CSV destinations before either writer can truncate a file.
-            const auto trajectoryPath = std::filesystem::weakly_canonical(params.outputFile);
-            const auto diagnosticsPath = std::filesystem::weakly_canonical(params.diagnosticsFile);
+            // Check all managed destinations before replacing any artefact.
+            const auto trajectoryPath = std::filesystem::weakly_canonical(paths.trajectory);
+            const auto diagnosticsPath = std::filesystem::weakly_canonical(paths.diagnostics);
             if (sameFile(trajectoryPath, diagnosticsPath))
-                throw std::runtime_error("outputFile and diagnosticsFile must be different");
+                throw std::runtime_error(
+                    "managed trajectory and diagnostics paths must be different");
             protectInput(trajectoryPath);
             protectInput(diagnosticsPath);
             checkCheckpointDestination(firstCheckpointIndex);
-            if (!params.overwriteOutput) {
-                for (const auto &path : {trajectoryPath, diagnosticsPath})
-                    if (std::filesystem::exists(path))
-                        throw std::runtime_error("refusing to overwrite output file: " +
-                                                 path.string());
+            if (hasManagedRunOutput(paths)) {
+                if (!params.overwriteRun)
+                    throw std::runtime_error(
+                        "run directory already contains solver output: " +
+                        paths.directory.string() +
+                        " (choose another runDirectory or set overwriteRun true)");
+                removeManagedRunOutput(paths);
             }
-            trajectory =
-                std::make_unique<TrajectoryWriter>(params.outputFile, params.overwriteOutput);
-            diagnostics = std::make_unique<DiagnosticsWriter>(params.diagnosticsFile, initial,
-                                                              params.overwriteOutput);
+            trajectory = std::make_unique<TrajectoryWriter>(paths.trajectory.string(), false);
+            diagnostics =
+                std::make_unique<DiagnosticsWriter>(paths.diagnostics.string(), initial, false);
             std::cout << "backend=" << backendName() << '\n'
                       << "trajectory="
-                      << std::filesystem::absolute(params.outputFile).lexically_normal()
+                      << std::filesystem::absolute(paths.trajectory).lexically_normal()
                       << " interval=" << schedule.trajectoryInterval << '\n'
                       << "diagnostics="
-                      << std::filesystem::absolute(params.diagnosticsFile).lexically_normal()
+                      << std::filesystem::absolute(paths.diagnostics).lexically_normal()
                       << " interval=" << schedule.diagnosticsInterval << '\n'
                       << "checkpoints="
-                      << std::filesystem::absolute(params.checkpointDirectory).lexically_normal()
+                      << std::filesystem::absolute(paths.checkpoints).lexically_normal()
                       << " interval=" << schedule.checkpointInterval << '\n'
                       << std::flush;
         }
 
+        const auto synchronizeDeviceState = [&] {
+            if (deviceStepping && !hostStateCurrent) {
+                kernel->downloadDeviceState(vortices);
+                hostStateCurrent = true;
+            }
+        };
         const auto writeTrajectory = [&] {
-            kernel->evaluate(vortices, velocity);
+            synchronizeDeviceState();
+            if (deviceStepping)
+                kernel->evaluateDeviceState(velocity);
+            else
+                kernel->evaluate(vortices, velocity);
             if (backendIsRoot())
-                trajectory->write(time, vortices, velocity);
+                trajectory->write(time, eventIndex, vortices, velocity);
         };
         const auto writeDiagnostics = [&] {
+            synchronizeDeviceState();
             const Invariants current = computeInvariants(vortices, *kernel);
             const DipoleEventState eventState = dipoles.state();
             if (backendIsRoot()) {
-                diagnostics->write(time, current, segmentReference, eventState.removedPairs,
-                                   eventState.reinjectedPairs);
+                diagnostics->write(time, eventIndex, current, segmentReference,
+                                   eventState.removedPairs, eventState.reinjectedPairs);
                 printDiagnostics(time, acceptedSteps, current, initial, params.boundaryCondition,
                                  segmentReference, eventState.removedPairs,
                                  eventState.reinjectedPairs);
             }
         };
         const auto writeCurrentCheckpoint = [&] {
+            synchronizeDeviceState();
             if (backendIsRoot()) {
                 checkCheckpointDestination(outputIndex);
-                writeCheckpoint(params.checkpointDirectory, vortices, initial, time, dt, nextOutput,
-                                acceptedSteps, outputIndex, params.coreRadius, params.integrator,
-                                params.boundaryCondition, geometry.lengthX, geometry.lengthY,
-                                geometry.imageLayers, params.dipoleRemoval,
+                writeCheckpoint(paths.checkpoints.string(), vortices, initial, time, dt, nextOutput,
+                                acceptedSteps, outputIndex, eventIndex, params.coreRadius,
+                                params.integrator, params.boundaryCondition, geometry.lengthX,
+                                geometry.lengthY, geometry.imageLayers, params.dipoleRemoval,
                                 params.dipoleRemovalDistance, params.dipoleReinjection,
-                                dipoles.state(), segmentReference, schedule,
-                                params.overwriteCheckpoints);
+                                dipoles.state(), segmentReference, schedule, false);
             }
         };
 
@@ -263,6 +299,9 @@ int main(int argc, char **argv) {
         writeDiagnostics();
         if (!restarting)
             writeCurrentCheckpoint();
+        if (backendIsRoot())
+            writeRunProvenance(params, parameterFile, backendName(), backendRuntimeDetails(), time,
+                               eventIndex, restarting);
 
         while (time < params.endTime) {
             // Land on the next event from any output stream, or the final time.
@@ -273,7 +312,17 @@ int main(int argc, char **argv) {
                 throw std::runtime_error("timestep cannot advance simulation time");
             double acceptedStep = stepSize;
 
-            if (params.integrator == IntegratorKind::rk4) {
+            if (deviceStepping && params.integrator == IntegratorKind::rk4) {
+                kernel->deviceRk4Step(stepSize);
+                hostStateCurrent = false;
+            } else if (deviceStepping) {
+                const DeviceStepResult result = kernel->deviceDopri5Step(
+                    stepSize, params.absoluteTolerance, params.relativeTolerance,
+                    params.minimumTimeStep, params.maximumTimeStep);
+                acceptedStep = result.acceptedTimeStep;
+                dt = result.suggestedTimeStep;
+                hostStateCurrent = false;
+            } else if (params.integrator == IntegratorKind::rk4) {
                 integrator.rk4Step(vortices, stepSize, *kernel);
             } else {
                 const StepResult result =
@@ -288,8 +337,15 @@ int main(int argc, char **argv) {
             if (acceptedSteps == std::numeric_limits<std::size_t>::max())
                 throw std::runtime_error("accepted-step counter overflow");
             ++acceptedSteps;
+            if (deviceStepping && params.dipoleRemoval)
+                synchronizeDeviceState();
             if (dipoles.process(vortices) != 0) {
                 integrator.invalidateCachedDerivative();
+                if (deviceStepping) {
+                    kernel->uploadDeviceState(vortices);
+                    kernel->invalidateDeviceDerivative();
+                    hostStateCurrent = true;
+                }
                 segmentReference = computeInvariants(vortices, *kernel);
             }
 
@@ -316,6 +372,11 @@ int main(int argc, char **argv) {
                 advance(schedule.nextDiagnosticsTime, schedule.diagnosticsInterval);
             if (checkpointDue)
                 advance(schedule.nextCheckpointTime, schedule.checkpointInterval);
+            if (trajectoryDue || diagnosticsDue || checkpointDue || finalFrame) {
+                if (eventIndex == std::numeric_limits<std::size_t>::max())
+                    throw std::runtime_error("output event-frame counter overflow");
+                ++eventIndex;
+            }
             if (trajectoryDue || finalFrame)
                 writeTrajectory();
             if (diagnosticsDue || finalFrame)

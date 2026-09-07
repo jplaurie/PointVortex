@@ -34,7 +34,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create an MP4 from the trajectory CSV written by PointVortex."
     )
-    parser.add_argument("input", type=Path, help="trajectory CSV, normally vortices.csv")
+    parser.add_argument("input", type=Path, help="trajectory CSV, normally runDirectory/trajectory.csv")
     parser.add_argument("-o", "--output", type=Path, default=Path("vortices.mp4"))
     parser.add_argument(
         "--geometry", choices=("infinite", "periodic", "disk"), default="infinite"

@@ -12,17 +12,16 @@ import sys
 import tempfile
 
 
-def run(command, directory, geometry, rows, end):
+def run(command, directory, geometry, rows, end, integrator='rk4'):
     directory.mkdir()
     initial = directory / 'initial.dat'
     initial.write_text(''.join(f'{x:.17g} {y:.17g} {gamma:.17g}\n' for x, y, gamma in rows))
     params = directory / 'run.params'
     params.write_text(
         f'initialConditionFile {initial}\nboundaryCondition {geometry}\n'
-        f'endTime {end}\nintegrator rk4\ntimeStep 0.001\noutputTime 0.002\n'
+        f'endTime {end}\nintegrator {integrator}\ntimeStep 0.001\noutputTime 0.002\n'
         'diagnosticsTime 0.001\ncheckpointTime 0.003\nnumThreads 2\n'
-        f'outputFile {directory}/vortices.csv\ndiagnosticsFile {directory}/diagnostics.csv\n'
-        f'checkpointDirectory {directory}/checkpoints\n')
+        f'runDirectory {directory}\n')
     result = subprocess.run([*command, str(params)], text=True, capture_output=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -58,9 +57,16 @@ def main(cpu, backend):
             left, right = root / (name + '_cpu'), root / (name + '_backend')
             run([cpu], left, geometry, rows, end)
             run(backend, right, geometry, rows, end)
-            for filename in ('vortices.csv', 'diagnostics.csv'):
+            for filename in ('trajectory.csv', 'diagnostics.csv'):
                 compare(left / filename, right / filename)
             print(f'{name}: matched CPU reference', flush=True)
+        for geometry in ('infinite', 'periodic', 'disk'):
+            left, right = root / (geometry + '_dopri_cpu'), root / (geometry + '_dopri_backend')
+            run([cpu], left, geometry, ordinary, .003, integrator='dopri5')
+            run(backend, right, geometry, ordinary, .003, integrator='dopri5')
+            for filename in ('trajectory.csv', 'diagnostics.csv'):
+                compare(left / filename, right / filename)
+            print(f'{geometry}_dopri: matched CPU reference', flush=True)
     print('all backend consistency tests passed')
 
 

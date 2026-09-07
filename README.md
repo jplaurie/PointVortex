@@ -23,14 +23,13 @@ This advances a two-vortex infinite-plane case to time `0.1`. It writes:
 
 | File | Contents |
 |---|---|
-| `data/quickstart/vortices.csv` | Saved positions, circulations, and velocities |
-| `data/quickstart/diagnostics.csv` | Invariants and conservation drift |
-| `data/quickstart/checkpoints/` | Restart checkpoints |
+| `runs/quickstart/trajectory.csv` | Saved positions, circulations, and velocities |
+| `runs/quickstart/diagnostics.csv` | Invariants and conservation drift |
+| `runs/quickstart/checkpoints/` | Restart checkpoints |
 
-Output paths are relative to the directory where the executable is launched. Missing output
-directories are created automatically. Existing outputs are protected by default; change the
-output paths for a new experiment, or deliberately set the relevant `overwrite*` option to
-`true`.
+Every simulation has one managed run directory. Missing directories are created automatically.
+Existing solver output is protected; use a new `runDirectory` for another experiment, or set
+`overwriteRun true` to replace the managed output in that directory.
 
 [`params.txt`](params.txt) is a larger periodic example with 400 vortices, adaptive integration,
 and dipole removal/reinjection.
@@ -56,7 +55,7 @@ and dipole removal/reinjection.
 │   ├── analysis/         Jupyter notebook for diagnostics and configuration figures
 │   └── movie/            CSV-to-MP4 renderer
 ├── archive/              Historical implementations; not part of the active build
-├── data/                 Default run output (generated; only `.gitkeep` is tracked)
+├── runs/                 Generated managed run output (ignored by Git)
 ├── CMakeLists.txt        Primary cross-platform build configuration
 ├── Makefile              Lightweight alternative build workflow
 └── params.txt            Full periodic-run example
@@ -143,8 +142,10 @@ fit the available CPU cores:
 OMP_NUM_THREADS=8 mpirun -n 2 ./build/release/point_vortex_mpi run.params
 ```
 
-The CUDA backend requires an NVIDIA GPU, driver, and CUDA toolkit. It accelerates velocity
-evaluation; integration, diagnostics, and file I/O remain on the host.
+The CUDA backend requires an NVIDIA GPU, driver, and CUDA toolkit. It keeps vortex state and
+RK4/DOPRI5 stages on the GPU between output events, avoiding per-stage host/device transfers.
+The host synchronizes state only for output, diagnostics, checkpoints, and enabled dipole
+processing. This uses additional GPU memory for the integration-stage buffers.
 
 ## Parameter files
 
@@ -159,9 +160,7 @@ integrator rk4
 timeStep 0.001
 endTime 0.1
 outputTime 0.02
-outputFile data/vortices.csv
-diagnosticsFile data/diagnostics.csv
-checkpointDirectory data/checkpoints
+runDirectory runs/my-two-vortex-case
 ```
 
 Most-used settings:
@@ -178,6 +177,8 @@ Most-used settings:
 | `numThreads` | `0` | OpenMP thread count; zero defers to the runtime |
 | `initialConditionFile` | unset | File with `x y circulation` rows |
 | `restartFile` | unset | Checkpoint to restore; overrides the initial condition |
+| `runDirectory` | `runs/default` | Self-contained output root for this simulation |
+| `overwriteRun` | `false` | Replace this directory's managed solver output |
 
 For a periodic box, set `boxLengthX`, `boxLengthY` (currently equal), and optionally
 `periodicImageLayers`; total circulation must be zero. For a disk, set `diskRadius`; every vortex
@@ -217,39 +218,66 @@ Or build and use the generator:
 cmake --build build/release --target point_vortex_initial --parallel
 ./build/release/point_vortex_initial \
   --geometry periodic --case random --count 400 --seed 20261376 \
-  --box-length 2 --min-separation 0.01 --output data/initial_n400.dat
+  --box-length 2 --min-separation 0.01 --output runs/periodic_n400/initial_n400.dat
 ```
 
 The generator supports `single`, `pair`, `dipole`, `ring`, and `random` cases, records geometry
 metadata, and refuses incompatible solver settings. Full options and examples are in
 [`initial_conditions/README.md`](initial_conditions/README.md).
 
-## Output and restarting
+## Output, run records, and restarting
+
+Every simulation writes to a self-contained run directory. `runDirectory` defaults to
+`runs/default`; give each experiment a descriptive directory:
+
+```text
+runDirectory runs/periodic_n400
+```
+
+The solver creates this fixed layout, which keeps each experiment's outputs together.
+
+```text
+runs/periodic_n400/
+├── trajectory.csv
+├── diagnostics.csv
+├── checkpoints/
+├── resolved_parameters.txt
+└── segments/
+    └── segment_00000001/resolved_parameters.txt
+```
+
+`resolved_parameters.txt` records the validated settings, resolved output paths, selected
+backend, and available runtime details (OpenMP threads, MPI ranks, or CUDA device). Every fresh
+run, restart, or branch gets a new numbered segment record, retaining the provenance of the
+invocation even when the top-level record is updated. A run directory that already contains solver
+output is rejected by default. Set `overwriteRun true` only when intentionally replacing its
+trajectory, diagnostics, checkpoints, and provenance records; unrelated files in that directory
+are not removed.
 
 Every backend writes the same portable formats:
 
-| Output | Default | Notes |
+| Output | Location | Notes |
 |---|---|---|
-| Trajectory | `vortices.csv` | `time,index,x,y,circulation,u,v` rows |
-| Diagnostics | `diagnostics.csv` | Invariants, drift, and dipole-event counts |
-| Checkpoints | `checkpoints/checkpoint_*.dat` | Versioned restart state |
+| Trajectory | `runDirectory/trajectory.csv` | `time,frame,index,x,y,circulation,u,v` rows |
+| Diagnostics | `runDirectory/diagnostics.csv` | Invariants, drift, and dipole-event counts |
+| Checkpoints | `runDirectory/checkpoints/checkpoint_*.dat` | Versioned restart state |
 
 Trajectory, diagnostics, and checkpoint intervals are simulation time, not wall-clock time.
-The solver always saves the initial and final states. Output files and checkpoint destinations
-must be distinct from inputs and from one another.
+The solver always saves the initial and final states.
 
-To branch from a checkpoint, create a new parameter file with new output destinations:
+To branch from a checkpoint, create a new parameter file with a new run directory:
 
 ```text
-restartFile data/checkpoints/checkpoint_00000005.dat
+restartFile runs/periodic_n400/checkpoints/checkpoint_00000005.dat
 endTime 2.0
-outputFile data/branch_vortices.csv
-diagnosticsFile data/branch_diagnostics.csv
-checkpointDirectory data/branch_checkpoints
+runDirectory runs/periodic_n400_branch
 ```
 
 The geometry, integrator, core radius, and dipole settings must match the checkpoint. The
-restart begins new CSV files; it does not append to the source trajectory.
+restart begins new CSV files; it does not append to the source trajectory. `frame` is a
+monotonically increasing output-event identifier stored in trajectory, diagnostics, and
+checkpoints. It lets analysis join streams reliably when their independent schedules coincide;
+gaps in an individual CSV mean that stream was not scheduled at that event.
 
 ## Analysis and movies
 
@@ -263,8 +291,8 @@ Its requirements and settings are in [`scripts/analysis/README.md`](scripts/anal
 Render a trajectory to MP4 with:
 
 ```bash
-python3 scripts/movie/make_vortex_movie.py data/vortices.csv \
-  --geometry periodic --box-length 2 --output data/periodic.mp4
+python3 scripts/movie/make_vortex_movie.py runs/periodic_n400/trajectory.csv \
+  --geometry periodic --box-length 2 --output runs/periodic_n400/periodic.mp4
 ```
 
 See [`scripts/movie/README.md`](scripts/movie/README.md) for dependencies and options.
@@ -294,14 +322,11 @@ dependencies are installed.
 ## Limitations
 
 - Velocity evaluation is direct `O(N^2)`; MPI still replicates the source arrays on each rank.
-- CUDA offloads velocity evaluation, not the full integrator or diagnostics.
+- CUDA keeps velocity evaluation and RK4/DOPRI5 integration on the device; diagnostics and file
+  I/O remain host-side, and the stage buffers increase GPU-memory use.
 - Periodic dynamics currently requires a square, zero-net-circulation domain.
 - Core regularization is available only for the infinite plane.
 - Singular encounters, disk-boundary violations, and non-finite states stop the run.
 - `archive/` and legacy plotting scripts are retained for history and are not part of the active,
   tested workflow.
 
-## Reuse
-
-No license is currently included. Choose and add a license before publishing the project for
-reuse, and review the provenance of any files retained under `archive/`.

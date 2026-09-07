@@ -37,15 +37,13 @@ def main(build):
             params.write_text(f'boundaryCondition {geometry}\ninitialConditionFile {initial}\n'
                               'integrator rk4\ntimeStep 0.00001\nendTime 0.00002\noutputTime 0.00001\n'
                               'numThreads 1\n'
-                              f'outputFile {directory}/vortices.csv\n'
-                              f'diagnosticsFile {directory}/diagnostics.csv\n'
-                              f'checkpointDirectory {directory}/checkpoints\n')
+                              f'runDirectory {directory}\n')
             checked([build / 'point_vortex_cpu', params])
             for mode in ('ordinary', 'zero_strength', 'empty'):
-                trajectory = directory / 'vortices.csv'
+                trajectory = directory / 'trajectory.csv'
                 if mode != 'ordinary':
                     trajectory = directory / (mode + '.csv')
-                    rows = (directory / 'vortices.csv').read_text().splitlines()
+                    rows = (directory / 'trajectory.csv').read_text().splitlines()
                     if mode == 'empty':
                         rows = rows[:1]
                     else:
@@ -55,10 +53,10 @@ def main(build):
                 figures = directory / ('figures_' + mode)
                 first = code[0].replace('geometry = "periodic"', f'geometry = {geometry!r}')
                 first = first.replace('box_length = 1.0', 'box_length = 2.0')
-                first = first.replace('trajectory_name = "data/vortices.csv"', f'trajectory_name = {str(trajectory)!r}')
-                first = first.replace('diagnostics_name = "data/diagnostics.csv"',
+                first = first.replace('trajectory_name = "runs/default/trajectory.csv"', f'trajectory_name = {str(trajectory)!r}')
+                first = first.replace('diagnostics_name = "runs/default/diagnostics.csv"',
                                       f'diagnostics_name = {str(directory / "diagnostics.csv")!r}')
-                first = first.replace('figure_directory_name = "data/figures"',
+                first = first.replace('figure_directory_name = "runs/default/figures"',
                                       f'figure_directory_name = {str(figures)!r}')
                 namespace = {}
                 for source in (first, *code[1:]):
@@ -68,7 +66,7 @@ def main(build):
                 namespace['plt'].close('all')
             movie = directory / 'movie.mp4'
             checked([sys.executable, repo / 'scripts/movie/make_vortex_movie.py',
-                     directory / 'vortices.csv', '--geometry', geometry, '--box-length', '2',
+                     directory / 'trajectory.csv', '--geometry', geometry, '--box-length', '2',
                      '--dpi', '50', '--fps', '4', '-o', movie])
             assert movie.stat().st_size > 100
             print(f'{geometry}: generator, notebook, and movie passed', flush=True)

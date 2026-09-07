@@ -16,7 +16,8 @@ jupyter lab scripts/analysis/point_vortex_analysis.ipynb
 
 Edit the settings in the first code cell to select `infinite`, `periodic`, or `disk`, specify the
 domain size, input CSV paths, number of snapshots, and output directory. The defaults read
-`data/vortices.csv` and `data/diagnostics.csv` and write PDFs under `data/figures/`.
+`runs/default/trajectory.csv` and `runs/default/diagnostics.csv` and write PDFs under
+`runs/default/figures/`.
 
 The notebook requires Python 3, NumPy, Matplotlib, and Jupyter. It does not require pandas or a
 LaTeX installation. It searches upward for the repository root, so it can also be launched from

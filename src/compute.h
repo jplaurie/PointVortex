@@ -1,7 +1,15 @@
 #ifndef POINT_VORTEX_COMPUTE_H
 #define POINT_VORTEX_COMPUTE_H
 #include "vortex.h"
+#include <array>
 #include <vector>
+
+struct DeviceStepResult {
+    double acceptedTimeStep = 0.0;
+    double suggestedTimeStep = 0.0;
+    double normalizedError = 0.0;
+    unsigned rejectedSteps = 0;
+};
 // Geometry-independent right-hand side used by both time integrators.
 class VelocityKernel {
   public:
@@ -13,6 +21,14 @@ class VelocityKernel {
                                const std::vector<double> &circulation, VelocityField &velocity,
                                std::size_t begin, std::size_t end) const = 0;
     virtual double hamiltonian(const VortexSystem &) const = 0;
+    // CUDA overrides these hooks to retain state and Runge--Kutta stages on the device.
+    virtual bool supportsDeviceStepping() const noexcept { return false; }
+    virtual void uploadDeviceState(const VortexSystem &) const;
+    virtual void downloadDeviceState(VortexSystem &) const;
+    virtual void evaluateDeviceState(VelocityField &) const;
+    virtual void deviceRk4Step(double) const;
+    virtual DeviceStepResult deviceDopri5Step(double, double, double, double, double) const;
+    virtual void invalidateDeviceDerivative() const noexcept {}
 };
 class InfinitePlaneKernel final : public VelocityKernel {
   public:

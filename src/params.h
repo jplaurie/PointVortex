@@ -2,6 +2,7 @@
 #define POINT_VORTEX_PARAMS_H
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 enum class IntegratorKind { rk4, dopri5 };
@@ -40,14 +41,25 @@ struct SimParams {
     double dipoleRemovalDistance = 0.01;
     ReinjectionMode dipoleReinjection = ReinjectionMode::none;
 
-    // Input, output, and restart paths.
+    // Input, restart, and managed-run paths.
     std::string initialConditionFile;
     std::string restartFile;
-    std::string checkpointDirectory = "checkpoints";
-    std::string outputFile = "vortices.csv";
-    std::string diagnosticsFile = "diagnostics.csv";
-    bool overwriteOutput = false;
-    bool overwriteCheckpoints = false;
+    std::string runDirectory = "runs/default";
+    // Replaces the managed solver artefacts in runDirectory when true.
+    bool overwriteRun = false;
     void validate() const;
 };
+
+struct RunPaths {
+    std::filesystem::path directory;
+    std::filesystem::path trajectory;
+    std::filesystem::path diagnostics;
+    std::filesystem::path checkpoints;
+};
+
+[[nodiscard]] inline RunPaths runPaths(const SimParams &params) {
+    const std::filesystem::path directory(params.runDirectory);
+    return {directory, directory / "trajectory.csv", directory / "diagnostics.csv",
+            directory / "checkpoints"};
+}
 #endif

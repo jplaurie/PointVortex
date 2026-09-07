@@ -26,6 +26,7 @@ struct Checkpoint {
     OutputSchedule outputSchedule;
     std::size_t acceptedSteps = 0;
     std::size_t outputIndex = 0;
+    std::size_t eventIndex = 0;
     double coreRadius = 0.0;
     IntegratorKind integrator = IntegratorKind::dopri5;
     std::string boundaryCondition = "infinite";
@@ -41,7 +42,7 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename);
 void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem &vortices,
                      const Invariants &initialInvariants, double time, double suggestedTimeStep,
                      double nextOutputTime, std::size_t acceptedSteps, std::size_t outputIndex,
-                     double coreRadius, IntegratorKind integrator,
+                     std::size_t eventIndex, double coreRadius, IntegratorKind integrator,
                      const std::string &boundaryCondition, double geometryLengthX,
                      double geometryLengthY, int periodicImageLayers, bool dipoleRemoval,
                      double dipoleRemovalDistance, ReinjectionMode dipoleReinjection,

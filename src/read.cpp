@@ -83,10 +83,8 @@ void SimParams::validate() const {
     if (boundaryCondition == "periodic" &&
         std::abs(boxLengthX - boxLengthY) > 1e-13 * std::max(boxLengthX, boxLengthY))
         throw std::invalid_argument("Weiss-McWilliams periodic geometry requires a square box");
-    if (outputFile.empty() || diagnosticsFile.empty() || checkpointDirectory.empty())
-        throw std::invalid_argument("output and checkpoint paths must not be empty");
-    if (outputFile == diagnosticsFile)
-        throw std::invalid_argument("outputFile and diagnosticsFile must be different");
+    if (runDirectory.empty())
+        throw std::invalid_argument("runDirectory must not be empty");
 }
 SimParams loadParams(const std::string &filename) {
     std::ifstream input(filename);
@@ -159,14 +157,9 @@ SimParams loadParams(const std::string &filename) {
                 p.initialConditionFile = value;
             else if (key == "restartFile")
                 p.restartFile = value;
-            else if (key == "checkpointDirectory")
-                p.checkpointDirectory = value;
-            else if (key == "outputFile")
-                p.outputFile = value;
-            else if (key == "diagnosticsFile")
-                p.diagnosticsFile = value;
-            else if (key == "dipoleRemoval" || key == "overwriteOutput" ||
-                     key == "overwriteCheckpoints") {
+            else if (key == "runDirectory")
+                p.runDirectory = value;
+            else if (key == "dipoleRemoval" || key == "overwriteRun") {
                 bool enabled;
                 if (value == "true" || value == "1")
                     enabled = true;
@@ -176,10 +169,8 @@ SimParams loadParams(const std::string &filename) {
                     throw std::invalid_argument(key + " must be true or false");
                 if (key == "dipoleRemoval")
                     p.dipoleRemoval = enabled;
-                else if (key == "overwriteOutput")
-                    p.overwriteOutput = enabled;
                 else
-                    p.overwriteCheckpoints = enabled;
+                    p.overwriteRun = enabled;
             } else if (key == "dipoleReinjection") {
                 if (value == "none")
                     p.dipoleReinjection = ReinjectionMode::none;

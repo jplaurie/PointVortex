@@ -30,11 +30,12 @@ dipoleRemovalDistance 0.02
 dipoleReinjection paired
 # Optional: a whitespace- or comma-separated file with x, y, circulation per line.
 # initialConditionFile initial.csv
-outputFile data/vortices.csv
-diagnosticsFile data/diagnostics.csv
+# Every solver run is self-contained. This is the default location; choose a new name for
+# each experiment. PointVortex writes trajectory.csv, diagnostics.csv, checkpoints/,
+# resolved_parameters.txt, and segments/ here.
+runDirectory runs/periodic_n400
 # Restarting restores time, timestep, step count, output index, and vortex state.
-# Use new output filenames and a new checkpoint directory when branching a run.
-# restartFile data/checkpoints/checkpoint_00000005.dat
-checkpointDirectory data/checkpoints
-overwriteOutput false
-overwriteCheckpoints false
+# Branch a restart into a new run directory.
+# restartFile runs/periodic_n400/checkpoints/checkpoint_00000005.dat
+# Set true only to replace an existing run's managed solver output.
+overwriteRun false
