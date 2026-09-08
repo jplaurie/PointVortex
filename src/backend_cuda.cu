@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "timestep.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,13 +22,25 @@ enum class Geometry : int { infinite, periodic, disk };
 __global__ void velocityKernel(const double *x, const double *y, const double *gamma, double *u,
                                double *v, std::size_t count, std::size_t begin, std::size_t end,
                                Geometry geometry, double first, double second, int imageLayers,
-                               int *singular) {
+                               int *failure) {
     const std::size_t target =
         begin + static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (target >= end)
         return;
+    if (!isfinite(x[target]) || !isfinite(y[target]) ||
+        (geometry == Geometry::disk &&
+         x[target] * x[target] + y[target] * y[target] >= first * first)) {
+        atomicExch(failure, 1);
+        return;
+    }
     constexpr double inverseTwoPi = 0.15915494309189533576888376337251;
     double velocityX = 0.0, velocityY = 0.0;
+    double inverseRadius = 0.0, targetX = 0.0, targetY = 0.0;
+    if (geometry == Geometry::disk) {
+        inverseRadius = 1.0 / first;
+        targetX = x[target] * inverseRadius;
+        targetY = y[target] * inverseRadius;
+    }
 
     for (std::size_t source = 0; source < count; ++source) {
         if (geometry == Geometry::infinite) {
@@ -37,7 +50,7 @@ __global__ void velocityKernel(const double *x, const double *y, const double *g
             const double dy = y[target] - y[source];
             const double denominator = dx * dx + dy * dy + first;
             if (denominator == 0.0) {
-                atomicExch(singular, 1);
+                atomicExch(failure, 1);
                 continue;
             }
             const double coefficient = inverseTwoPi * gamma[source] / denominator;
@@ -61,7 +74,7 @@ __global__ void velocityKernel(const double *x, const double *y, const double *g
                 const double denominatorU = 2.0 * (sinhHalfX * sinhHalfX + sinHalfY * sinHalfY);
                 const double denominatorV = 2.0 * (sinhHalfY * sinhHalfY + sinHalfX * sinHalfX);
                 if (denominatorU == 0.0 || denominatorV == 0.0) {
-                    atomicExch(singular, 1);
+                    atomicExch(failure, 1);
                     continue;
                 }
                 velocityX -= scale * gamma[source] * sineY / denominatorU;
@@ -73,27 +86,30 @@ __global__ void velocityKernel(const double *x, const double *y, const double *g
                 const double dy = y[target] - y[source];
                 const double denominator = dx * dx + dy * dy;
                 if (denominator == 0.0) {
-                    atomicExch(singular, 1);
+                    atomicExch(failure, 1);
                 } else {
                     const double coefficient = inverseTwoPi * gamma[source] / denominator;
                     velocityX -= coefficient * dy;
                     velocityY += coefficient * dx;
                 }
             }
-            const double tx = x[target] / first, ty = y[target] / first;
-            const double sx = x[source] / first, sy = y[source] / first;
-            const double a = 1.0 - (tx * sx + ty * sy);
-            const double b = ty * sx - tx * sy;
+            const double sx = x[source] * inverseRadius, sy = y[source] * inverseRadius;
+            const double a = 1.0 - (targetX * sx + targetY * sy);
+            const double b = targetY * sx - targetX * sy;
             const double denominator = a * a + b * b;
             const double imageX = -a * sx - b * sy;
             const double imageY = -a * sy + b * sx;
-            const double coefficient = -inverseTwoPi * gamma[source] / first / denominator;
+            const double coefficient = -inverseTwoPi * gamma[source] * inverseRadius / denominator;
             velocityX -= coefficient * imageY;
             velocityY += coefficient * imageX;
         }
     }
-    u[target] = velocityX;
-    v[target] = velocityY;
+    if (!isfinite(velocityX) || !isfinite(velocityY))
+        atomicExch(failure, 1);
+    else {
+        u[target] = velocityX;
+        v[target] = velocityY;
+    }
 }
 
 __global__ void validateStateKernel(const double *x, const double *y, std::size_t count,
@@ -201,21 +217,9 @@ class CudaKernel final : public VelocityKernel {
                        std::size_t end) const override {
         validateVortexArrays(x, y, gamma);
         const std::size_t count = x.size();
-        if (y.size() != count || gamma.size() != count || begin > end || end > count)
+        if (begin > end || end > count)
             throw std::invalid_argument("invalid CUDA vortex arrays or target range");
-        if (geometry_ == Geometry::periodic) {
-            double total = 0.0, magnitude = 0.0;
-            for (double value : gamma) {
-                total += value;
-                magnitude += std::abs(value);
-            }
-            if (std::abs(total) > 1e-12 * std::max(1.0, magnitude))
-                throw std::invalid_argument("periodic box requires zero total circulation");
-        }
-        if (geometry_ == Geometry::disk)
-            for (std::size_t i = 0; i < count; ++i)
-                if (x[i] * x[i] + y[i] * y[i] >= params_.diskRadius * params_.diskRadius)
-                    throw std::invalid_argument("vortex lies on or outside the disk");
+        validateGeometry(x, y, gamma);
 
         velocity.resize(count);
         if (begin == end)
@@ -244,7 +248,7 @@ class CudaKernel final : public VelocityKernel {
     bool supportsDeviceStepping() const noexcept override { return true; }
     void uploadDeviceState(const VortexSystem &state) const override {
         state.validate();
-        validateGeometry(state);
+        validateGeometry(state.x, state.y, state.circulation);
         if (state.size() == 0) {
             stateCount_ = 0;
             deviceStateValid_ = true;
@@ -317,9 +321,8 @@ class CudaKernel final : public VelocityKernel {
         cudaCheck(cudaGetLastError(), "launch CUDA RK4 final stage");
         validateDeviceState(deviceX_, deviceY_);
     }
-    DeviceStepResult deviceDopri5Step(double dt, double absoluteTolerance, double relativeTolerance,
-                                      double minimumTimeStep,
-                                      double maximumTimeStep) const override {
+    StepResult deviceDopri5Step(double dt, double absoluteTolerance, double relativeTolerance,
+                                double minimumTimeStep, double maximumTimeStep) const override {
         if (!std::isfinite(dt) || !(dt > 0.0))
             throw std::invalid_argument("timestep must be finite and positive");
         requireDeviceState();
@@ -362,21 +365,12 @@ class CudaKernel final : public VelocityKernel {
             throw std::invalid_argument("CUDA grid exceeds the supported block count");
         return static_cast<int>(blocks);
     }
-    void validateGeometry(const VortexSystem &state) const {
-        if (geometry_ == Geometry::periodic) {
-            double total = 0.0, magnitude = 0.0;
-            for (double value : state.circulation) {
-                total += value;
-                magnitude += std::abs(value);
-            }
-            if (std::abs(total) > 1e-12 * std::max(1.0, magnitude))
-                throw std::invalid_argument("periodic box requires zero total circulation");
-        }
+    void validateGeometry(const std::vector<double> &x, const std::vector<double> &y,
+                          const std::vector<double> &circulation) const {
+        if (geometry_ == Geometry::periodic)
+            validatePeriodicCirculation(circulation);
         if (geometry_ == Geometry::disk)
-            for (std::size_t i = 0; i < state.size(); ++i)
-                if (state.x[i] * state.x[i] + state.y[i] * state.y[i] >=
-                    params_.diskRadius * params_.diskRadius)
-                    throw std::invalid_argument("vortex lies on or outside the disk");
+            validateDiskPositions(x, y, params_.diskRadius * params_.diskRadius);
     }
     void requireDeviceState() const {
         if (!deviceStateValid_)
@@ -410,9 +404,6 @@ class CudaKernel final : public VelocityKernel {
         if (begin == end)
             return;
         cudaCheck(cudaMemset(deviceFailure_, 0, sizeof(int)), "clear CUDA velocity error flag");
-        validateStateKernel<<<blockCount(stateCount_), threadsPerBlock>>>(
-            x, y, stateCount_, geometry_, params_.diskRadius * params_.diskRadius, deviceFailure_);
-        cudaCheck(cudaGetLastError(), "launch CUDA state-validation kernel");
         const double first =
             geometry_ == Geometry::infinite
                 ? params_.coreRadius * params_.coreRadius
@@ -438,16 +429,8 @@ class CudaKernel final : public VelocityKernel {
         cudaCheck(cudaGetLastError(), "launch CUDA Runge--Kutta stage");
     }
     void makeDopriStages(double dt) const {
-        static constexpr std::array<std::array<double, 7>, 7> coefficients = {
-            {{},
-             {1.0 / 5.0},
-             {3.0 / 40.0, 9.0 / 40.0},
-             {44.0 / 45.0, -56.0 / 15.0, 32.0 / 9.0},
-             {19372.0 / 6561.0, -25360.0 / 2187.0, 64448.0 / 6561.0, -212.0 / 729.0},
-             {9017.0 / 3168.0, -355.0 / 33.0, 46732.0 / 5247.0, 49.0 / 176.0, -5103.0 / 18656.0},
-             {35.0 / 384.0, 0.0, 500.0 / 1113.0, 125.0 / 192.0, -2187.0 / 6784.0, 11.0 / 84.0}}};
         for (std::size_t stage = 1; stage < 7; ++stage) {
-            makeStage(dt, coefficients[stage]);
+            makeStage(dt, integrator_detail::dopriCoefficients[stage]);
             evaluateDevice(deviceTemporaryX_, deviceTemporaryY_, deviceStageX_[stage],
                            deviceStageY_[stage], 0, stateCount_);
         }

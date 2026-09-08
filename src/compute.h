@@ -4,7 +4,11 @@
 #include <array>
 #include <vector>
 
-struct DeviceStepResult {
+void validatePeriodicCirculation(const std::vector<double> &circulation);
+void validateDiskPositions(const std::vector<double> &x, const std::vector<double> &y,
+                           double radiusSquared);
+
+struct StepResult {
     double acceptedTimeStep = 0.0;
     double suggestedTimeStep = 0.0;
     double normalizedError = 0.0;
@@ -27,7 +31,7 @@ class VelocityKernel {
     virtual void downloadDeviceState(VortexSystem &) const;
     virtual void evaluateDeviceState(VelocityField &) const;
     virtual void deviceRk4Step(double) const;
-    virtual DeviceStepResult deviceDopri5Step(double, double, double, double, double) const;
+    virtual StepResult deviceDopri5Step(double, double, double, double, double) const;
     virtual void invalidateDeviceDerivative() const noexcept {}
 };
 class InfinitePlaneKernel final : public VelocityKernel {

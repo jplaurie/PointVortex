@@ -13,32 +13,6 @@
 namespace {
 constexpr const char *checkpointMagic = "POINT_VORTEX_CHECKPOINT";
 constexpr unsigned checkpointVersion = 6;
-const char *integratorName(IntegratorKind kind) {
-    return kind == IntegratorKind::rk4 ? "rk4" : "dopri5";
-}
-IntegratorKind parseIntegrator(const std::string &value) {
-    if (value == "rk4")
-        return IntegratorKind::rk4;
-    if (value == "dopri5")
-        return IntegratorKind::dopri5;
-    throw std::runtime_error("unsupported checkpoint integrator: " + value);
-}
-const char *reinjectionName(ReinjectionMode mode) {
-    if (mode == ReinjectionMode::independent)
-        return "independent";
-    if (mode == ReinjectionMode::paired)
-        return "paired";
-    return "none";
-}
-ReinjectionMode parseReinjection(const std::string &value) {
-    if (value == "none")
-        return ReinjectionMode::none;
-    if (value == "independent")
-        return ReinjectionMode::independent;
-    if (value == "paired")
-        return ReinjectionMode::paired;
-    throw std::runtime_error("unsupported checkpoint reinjection mode: " + value);
-}
 } // namespace
 std::filesystem::path checkpointPath(const std::filesystem::path &directory,
                                      std::size_t outputIndex) {
@@ -47,17 +21,13 @@ std::filesystem::path checkpointPath(const std::filesystem::path &directory,
     return directory / filename.str();
 }
 void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem &vortices,
-                     const Invariants &initialInvariants, double time, double suggestedTimeStep,
-                     double nextOutputTime, std::size_t acceptedSteps, std::size_t outputIndex,
-                     std::size_t eventIndex, double coreRadius, IntegratorKind integrator,
-                     const std::string &boundaryCondition, double geometryLengthX,
-                     double geometryLengthY, int periodicImageLayers, bool dipoleRemoval,
-                     double dipoleRemovalDistance, ReinjectionMode dipoleReinjection,
-                     const DipoleEventState &dipoleState, const Invariants &segmentInvariants,
-                     const OutputSchedule &outputSchedule, bool overwrite) {
+                     const Invariants &initialInvariants, const SimParams &params,
+                     const Invariants &segmentInvariants, const DipoleEventState &dipoleState,
+                     const OutputSchedule &outputSchedule, const CheckpointProgress &progress,
+                     bool overwrite) {
     vortices.validate();
     std::filesystem::create_directories(directory);
-    const auto destination = checkpointPath(directory, outputIndex);
+    const auto destination = checkpointPath(directory, progress.outputIndex);
     if (!overwrite && std::filesystem::exists(destination))
         throw std::runtime_error("refusing to overwrite checkpoint: " + destination.string());
     auto temporary = destination;
@@ -69,22 +39,30 @@ void writeCheckpoint(const std::filesystem::path &directory, const VortexSystem 
             throw std::runtime_error("cannot create checkpoint: " + temporary.string());
         output << std::setprecision(17);
         output << checkpointMagic << ' ' << checkpointVersion << '\n';
-        output << "time " << time << '\n';
-        output << "suggested_time_step " << suggestedTimeStep << '\n';
-        output << "next_output_time " << nextOutputTime << '\n';
+        output << "time " << progress.time << '\n';
+        output << "suggested_time_step " << progress.suggestedTimeStep << '\n';
+        output << "next_output_time " << progress.nextOutputTime << '\n';
         output << "output_schedule " << outputSchedule.trajectoryInterval << ' '
                << outputSchedule.diagnosticsInterval << ' ' << outputSchedule.checkpointInterval
                << ' ' << outputSchedule.nextDiagnosticsTime << ' '
                << outputSchedule.nextCheckpointTime << '\n';
-        output << "accepted_steps " << acceptedSteps << '\n';
-        output << "output_index " << outputIndex << '\n';
-        output << "event_index " << eventIndex << '\n';
-        output << "core_radius " << coreRadius << '\n';
-        output << "integrator " << integratorName(integrator) << '\n';
-        output << "geometry " << boundaryCondition << ' ' << geometryLengthX << ' '
-               << geometryLengthY << ' ' << periodicImageLayers << '\n';
-        output << "dipole_config " << dipoleRemoval << ' ' << dipoleRemovalDistance << ' '
-               << reinjectionName(dipoleReinjection) << '\n';
+        output << "accepted_steps " << progress.acceptedSteps << '\n';
+        output << "output_index " << progress.outputIndex << '\n';
+        output << "event_index " << progress.eventIndex << '\n';
+        output << "core_radius " << params.coreRadius << '\n';
+        output << "integrator " << toString(params.integrator) << '\n';
+        const double geometryLengthX = params.boundaryCondition == "periodic"
+                                           ? params.boxLengthX
+                                           : (params.boundaryCondition == "disk" ? params.diskRadius
+                                                                                 : 0.0);
+        const double geometryLengthY =
+            params.boundaryCondition == "periodic" ? params.boxLengthY : 0.0;
+        const int imageLayers =
+            params.boundaryCondition == "periodic" ? params.periodicImageLayers : 0;
+        output << "geometry " << params.boundaryCondition << ' ' << geometryLengthX << ' '
+               << geometryLengthY << ' ' << imageLayers << '\n';
+        output << "dipole_config " << params.dipoleRemoval << ' '
+               << params.dipoleRemovalDistance << ' ' << toString(params.dipoleReinjection) << '\n';
         output << "dipole_counts " << dipoleState.removedPairs << ' ' << dipoleState.reinjectedPairs
                << '\n';
         output << "random_engine_state " << dipoleState.randomEngineState << '\n';
@@ -177,7 +155,10 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename) {
     input >> c.coreRadius;
     require("integrator");
     input >> integratorName;
-    c.integrator = parseIntegrator(integratorName);
+    const auto integrator = integratorFromString(integratorName);
+    if (!integrator)
+        throw std::runtime_error("unsupported checkpoint integrator: " + integratorName);
+    c.integrator = *integrator;
     if (fileVersion >= 2) {
         require("geometry");
         input >> c.boundaryCondition >> c.geometryLengthX >> c.geometryLengthY >>
@@ -187,7 +168,10 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename) {
         std::string reinjection;
         require("dipole_config");
         input >> c.dipoleRemoval >> c.dipoleRemovalDistance >> reinjection;
-        c.dipoleReinjection = parseReinjection(reinjection);
+        const auto mode = reinjectionFromString(reinjection);
+        if (!mode)
+            throw std::runtime_error("unsupported checkpoint reinjection mode: " + reinjection);
+        c.dipoleReinjection = *mode;
         require("dipole_counts");
         c.dipoleState.removedPairs = readSize();
         c.dipoleState.reinjectedPairs = readSize();
@@ -213,9 +197,7 @@ Checkpoint loadCheckpoint(const std::filesystem::path &filename) {
         double x, y, gamma;
         if (!(input >> x >> y >> gamma))
             throw std::runtime_error("checkpoint vortex data is truncated or invalid");
-        c.vortices.x.push_back(x);
-        c.vortices.y.push_back(y);
-        c.vortices.circulation.push_back(gamma);
+        c.vortices.pushBack(x, y, gamma);
     }
     std::string trailing;
     if (input >> trailing)

@@ -8,6 +8,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 double parseDouble(const std::string &value) {
@@ -32,6 +33,22 @@ int parseInt(const std::string &value) {
     if (parsed != value.size())
         throw std::invalid_argument("expected an integer");
     return result;
+}
+
+template <typename T> struct Parameter {
+    std::string_view name;
+    T SimParams::*member;
+};
+
+template <typename T, std::size_t N, typename Parser>
+bool assignParameter(const std::string &key, SimParams &params,
+                     const Parameter<T> (&parameters)[N], const std::string &value, Parser parser) {
+    for (const auto &[name, member] : parameters)
+        if (key == name) {
+            params.*member = parser(value);
+            return true;
+        }
+    return false;
 }
 } // namespace
 
@@ -93,6 +110,35 @@ SimParams loadParams(const std::string &filename) {
     SimParams p;
     std::optional<std::size_t> legacyNumSteps;
     bool explicitEndTime = false;
+    static constexpr Parameter<double> doubles[] = {
+        {"timeStep", &SimParams::timeStep},
+        {"endTime", &SimParams::endTime},
+        {"outputTime", &SimParams::outputTime},
+        {"OutputTime", &SimParams::outputTime},
+        {"coreRadius", &SimParams::coreRadius},
+        {"absoluteTolerance", &SimParams::absoluteTolerance},
+        {"relativeTolerance", &SimParams::relativeTolerance},
+        {"minimumTimeStep", &SimParams::minimumTimeStep},
+        {"maximumTimeStep", &SimParams::maximumTimeStep},
+        {"boxLengthX", &SimParams::boxLengthX},
+        {"boxLengthY", &SimParams::boxLengthY},
+        {"diskRadius", &SimParams::diskRadius},
+        {"dipoleRemovalDistance", &SimParams::dipoleRemovalDistance},
+    };
+    static constexpr Parameter<std::optional<double>> optionalDoubles[] = {
+        {"diagnosticsTime", &SimParams::diagnosticsTime},
+        {"checkpointTime", &SimParams::checkpointTime},
+    };
+    static constexpr Parameter<int> integers[] = {
+        {"numThreads", &SimParams::numThreads},
+        {"periodicImageLayers", &SimParams::periodicImageLayers},
+    };
+    static constexpr Parameter<std::string> strings[] = {
+        {"boundaryCondition", &SimParams::boundaryCondition},
+        {"initialConditionFile", &SimParams::initialConditionFile},
+        {"restartFile", &SimParams::restartFile},
+        {"runDirectory", &SimParams::runDirectory},
+    };
     std::string line;
     std::size_t lineNumber = 0;
     // Strict parsing prevents a misspelled option from silently using a default.
@@ -109,87 +155,43 @@ SimParams loadParams(const std::string &filename) {
             throw std::runtime_error("missing value on parameter line " +
                                      std::to_string(lineNumber));
         try {
-            if (key == "N") {
+            if (assignParameter(key, p, doubles, value, parseDouble)) {
+                if (key == "endTime")
+                    explicitEndTime = true;
+            } else if (assignParameter(key, p, optionalDoubles, value, parseDouble) ||
+                       assignParameter(key, p, integers, value, parseInt) ||
+                       assignParameter(key, p, strings, value,
+                                       [](const std::string &text) { return text; })) {
+            } else if (key == "N") {
                 const auto count = parseUnsigned(value);
                 if (count > std::numeric_limits<std::size_t>::max())
                     throw std::out_of_range("N is too large");
                 p.vortexCount = static_cast<std::size_t>(count);
-            } else if (key == "timeStep")
-                p.timeStep = parseDouble(value);
-            else if (key == "endTime") {
-                p.endTime = parseDouble(value);
-                explicitEndTime = true;
             } else if (key == "numSteps")
                 legacyNumSteps = parseUnsigned(value);
-            else if (key == "outputTime" || key == "OutputTime")
-                p.outputTime = parseDouble(value);
-            else if (key == "diagnosticsTime")
-                p.diagnosticsTime = parseDouble(value);
-            else if (key == "checkpointTime")
-                p.checkpointTime = parseDouble(value);
-            else if (key == "coreRadius")
-                p.coreRadius = parseDouble(value);
             else if (key == "coreSize")
                 p.coreRadius = std::sqrt(parseDouble(value));
-            else if (key == "absoluteTolerance")
-                p.absoluteTolerance = parseDouble(value);
-            else if (key == "relativeTolerance")
-                p.relativeTolerance = parseDouble(value);
-            else if (key == "minimumTimeStep")
-                p.minimumTimeStep = parseDouble(value);
-            else if (key == "maximumTimeStep")
-                p.maximumTimeStep = parseDouble(value);
-            else if (key == "numThreads")
-                p.numThreads = parseInt(value);
-            else if (key == "boxLengthX")
-                p.boxLengthX = parseDouble(value);
-            else if (key == "boxLengthY")
-                p.boxLengthY = parseDouble(value);
-            else if (key == "diskRadius")
-                p.diskRadius = parseDouble(value);
-            else if (key == "periodicImageLayers")
-                p.periodicImageLayers = parseInt(value);
             else if (key == "randomSeed")
                 p.randomSeed = parseUnsigned(value);
-            else if (key == "dipoleRemovalDistance")
-                p.dipoleRemovalDistance = parseDouble(value);
-            else if (key == "initialConditionFile")
-                p.initialConditionFile = value;
-            else if (key == "restartFile")
-                p.restartFile = value;
-            else if (key == "runDirectory")
-                p.runDirectory = value;
             else if (key == "dipoleRemoval" || key == "overwriteRun") {
-                bool enabled;
-                if (value == "true" || value == "1")
-                    enabled = true;
-                else if (value == "false" || value == "0")
-                    enabled = false;
-                else
+                const bool enabled = value == "true" || value == "1";
+                if (!enabled && value != "false" && value != "0")
                     throw std::invalid_argument(key + " must be true or false");
                 if (key == "dipoleRemoval")
                     p.dipoleRemoval = enabled;
                 else
                     p.overwriteRun = enabled;
             } else if (key == "dipoleReinjection") {
-                if (value == "none")
-                    p.dipoleReinjection = ReinjectionMode::none;
-                else if (value == "independent")
-                    p.dipoleReinjection = ReinjectionMode::independent;
-                else if (value == "paired")
-                    p.dipoleReinjection = ReinjectionMode::paired;
-                else
+                const auto mode = reinjectionFromString(value);
+                if (!mode)
                     throw std::invalid_argument(
                         "dipoleReinjection must be none, independent, or paired");
-            } else if (key == "boundaryCondition")
-                p.boundaryCondition = value;
-            else if (key == "integrator") {
-                if (value == "rk4")
-                    p.integrator = IntegratorKind::rk4;
-                else if (value == "dopri5")
-                    p.integrator = IntegratorKind::dopri5;
-                else
+                p.dipoleReinjection = *mode;
+            } else if (key == "integrator") {
+                const auto integrator = integratorFromString(value);
+                if (!integrator)
                     throw std::invalid_argument("integrator must be rk4 or dopri5");
+                p.integrator = *integrator;
             } else
                 throw std::invalid_argument("unknown parameter: " + key);
             std::string trailing;
@@ -235,9 +237,7 @@ VortexSystem loadVortices(const std::string &filename) {
             !std::isfinite(circulation))
             throw std::runtime_error("invalid initial condition on line " +
                                      std::to_string(lineNumber));
-        vortices.x.push_back(x);
-        vortices.y.push_back(y);
-        vortices.circulation.push_back(circulation);
+        vortices.pushBack(x, y, circulation);
     }
     if (input.bad())
         throw std::runtime_error("failed while reading initial-condition file: " + filename);

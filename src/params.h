@@ -5,8 +5,35 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-enum class IntegratorKind { rk4, dopri5 };
-enum class ReinjectionMode { none, independent, paired };
+#include <string_view>
+enum class IntegratorKind : std::uint8_t { rk4, dopri5 };
+enum class ReinjectionMode : std::uint8_t { none, independent, paired };
+[[nodiscard]] constexpr const char *toString(IntegratorKind kind) noexcept {
+    return kind == IntegratorKind::rk4 ? "rk4" : "dopri5";
+}
+[[nodiscard]] constexpr const char *toString(ReinjectionMode mode) noexcept {
+    return mode == ReinjectionMode::independent
+               ? "independent"
+               : (mode == ReinjectionMode::paired ? "paired" : "none");
+}
+[[nodiscard]] constexpr std::optional<IntegratorKind>
+integratorFromString(std::string_view value) noexcept {
+    if (value == "rk4")
+        return IntegratorKind::rk4;
+    if (value == "dopri5")
+        return IntegratorKind::dopri5;
+    return std::nullopt;
+}
+[[nodiscard]] constexpr std::optional<ReinjectionMode>
+reinjectionFromString(std::string_view value) noexcept {
+    if (value == "none")
+        return ReinjectionMode::none;
+    if (value == "independent")
+        return ReinjectionMode::independent;
+    if (value == "paired")
+        return ReinjectionMode::paired;
+    return std::nullopt;
+}
 struct SimParams {
     // Simulation and integrator controls.
     std::size_t vortexCount = 100;

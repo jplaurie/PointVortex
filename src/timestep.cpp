@@ -16,8 +16,8 @@ void RungeKuttaIntegrator::ensureSize(const VortexSystem &state) {
         fsalValid_ = false;
     }
 }
-void RungeKuttaIntegrator::makeStage(double dt, std::size_t stage,
-                                     const std::array<double, 7> &coefficients) {
+void RungeKuttaIntegrator::makeStage(std::size_t stage,
+                                     const std::array<double, 7> &coefficients, double dt) {
     for (std::size_t i = 0; i < initial_.size(); ++i) {
         double dx = 0.0, dy = 0.0;
         for (std::size_t j = 0; j < stage; ++j) {
@@ -37,13 +37,13 @@ void RungeKuttaIntegrator::rk4Step(VortexSystem &state, double dt, const Velocit
     fsalValid_ = false;
     kernel.evaluate(initial_.x, initial_.y, state.circulation, stages_[0]);
     const std::array<double, 7> a2 = {0.5};
-    makeStage(dt, 1, a2);
+    makeStage(1, a2, dt);
     kernel.evaluate(temporary_.x, temporary_.y, state.circulation, stages_[1]);
     const std::array<double, 7> a3 = {0.0, 0.5};
-    makeStage(dt, 2, a3);
+    makeStage(2, a3, dt);
     kernel.evaluate(temporary_.x, temporary_.y, state.circulation, stages_[2]);
     const std::array<double, 7> a4 = {0.0, 0.0, 1.0};
-    makeStage(dt, 3, a4);
+    makeStage(3, a4, dt);
     kernel.evaluate(temporary_.x, temporary_.y, state.circulation, stages_[3]);
     for (std::size_t i = 0; i < state.size(); ++i) {
         temporary_.x[i] = initial_.x[i] + dt *
@@ -66,14 +66,6 @@ StepResult RungeKuttaIntegrator::dopri5Step(VortexSystem &state, double dt,
     ensureSize(state);
     initial_.x = state.x;
     initial_.y = state.y;
-    static constexpr std::array<std::array<double, 7>, 7> a = {
-        {{},
-         {1.0 / 5.0},
-         {3.0 / 40.0, 9.0 / 40.0},
-         {44.0 / 45.0, -56.0 / 15.0, 32.0 / 9.0},
-         {19372.0 / 6561.0, -25360.0 / 2187.0, 64448.0 / 6561.0, -212.0 / 729.0},
-         {9017.0 / 3168.0, -355.0 / 33.0, 46732.0 / 5247.0, 49.0 / 176.0, -5103.0 / 18656.0},
-         {35.0 / 384.0, 0.0, 500.0 / 1113.0, 125.0 / 192.0, -2187.0 / 6784.0, 11.0 / 84.0}}};
     static constexpr double b5[7] = {
         35.0 / 384.0, 0.0, 500.0 / 1113.0, 125.0 / 192.0, -2187.0 / 6784.0, 11.0 / 84.0, 0.0};
     static constexpr double b4[7] = {
@@ -85,7 +77,7 @@ StepResult RungeKuttaIntegrator::dopri5Step(VortexSystem &state, double dt,
         kernel.evaluate(initial_.x, initial_.y, state.circulation, stages_[0]);
     for (;;) {
         for (std::size_t s = 1; s < 7; ++s) {
-            makeStage(dt, s, a[s]);
+            makeStage(s, integrator_detail::dopriCoefficients[s], dt);
             kernel.evaluate(temporary_.x, temporary_.y, state.circulation, stages_[s]);
         }
         double error = 0.0;

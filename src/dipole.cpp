@@ -105,15 +105,10 @@ std::size_t DipoleManager::process(VortexSystem &vortices) {
     VortexSystem survivors;
     const std::size_t selectedCount =
         static_cast<std::size_t>(std::count(selected.begin(), selected.end(), true));
-    survivors.x.reserve(originalPopulation - selectedCount);
-    survivors.y.reserve(originalPopulation - selectedCount);
-    survivors.circulation.reserve(originalPopulation - selectedCount);
+    survivors.reserve(originalPopulation - selectedCount);
     for (std::size_t i = 0; i < originalPopulation; ++i) {
-        if (!selected[i]) {
-            survivors.x.push_back(vortices.x[i]);
-            survivors.y.push_back(vortices.y[i]);
-            survivors.circulation.push_back(vortices.circulation[i]);
-        }
+        if (!selected[i])
+            survivors.pushBack(vortices.x[i], vortices.y[i], vortices.circulation[i]);
     }
     vortices = std::move(survivors);
     removedPairs_ += events.size();
@@ -135,9 +130,7 @@ void DipoleManager::injectSingle(VortexSystem &vortices, double circulation) {
     std::uniform_real_distribution<double> unit(0.0, 1.0);
     const double radius = params_.diskRadius * std::sqrt(unit(random_));
     const double angle = 2.0 * std::numbers::pi * unit(random_);
-    vortices.x.push_back(radius * std::cos(angle));
-    vortices.y.push_back(radius * std::sin(angle));
-    vortices.circulation.push_back(circulation);
+    vortices.pushBack(radius * std::cos(angle), radius * std::sin(angle), circulation);
 }
 
 void DipoleManager::injectPair(VortexSystem &vortices, double firstCirculation,
@@ -182,12 +175,8 @@ void DipoleManager::injectPair(VortexSystem &vortices, double firstCirculation,
         if (!placed)
             throw std::runtime_error("could not find a valid paired reinjection position");
     }
-    vortices.x.push_back(first.first);
-    vortices.y.push_back(first.second);
-    vortices.circulation.push_back(firstCirculation);
-    vortices.x.push_back(second.first);
-    vortices.y.push_back(second.second);
-    vortices.circulation.push_back(secondCirculation);
+    vortices.pushBack(first.first, first.second, firstCirculation);
+    vortices.pushBack(second.first, second.second, secondCirculation);
 }
 
 DipoleEventState DipoleManager::state() const {

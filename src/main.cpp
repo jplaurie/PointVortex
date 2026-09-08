@@ -52,28 +52,18 @@ void removeManagedRunOutput(const RunPaths &paths) {
     }
 }
 
-struct GeometryMetadata {
-    double lengthX = 0.0;
-    double lengthY = 0.0;
-    int imageLayers = 0;
-};
-
-GeometryMetadata geometryMetadata(const SimParams &params) {
-    if (params.boundaryCondition == "periodic")
-        return {params.boxLengthX, params.boxLengthY, params.periodicImageLayers};
-    if (params.boundaryCondition == "disk")
-        return {params.diskRadius, 0.0, 0};
-    return {};
-}
-
-bool checkpointMatches(const Checkpoint &checkpoint, const SimParams &params,
-                       const GeometryMetadata &geometry) {
+bool checkpointMatches(const Checkpoint &checkpoint, const SimParams &params) {
+    const double lengthX = params.boundaryCondition == "periodic"
+                               ? params.boxLengthX
+                               : (params.boundaryCondition == "disk" ? params.diskRadius : 0.0);
+    const double lengthY = params.boundaryCondition == "periodic" ? params.boxLengthY : 0.0;
+    const int imageLayers =
+        params.boundaryCondition == "periodic" ? params.periodicImageLayers : 0;
     return checkpoint.coreRadius == params.coreRadius &&
            checkpoint.integrator == params.integrator &&
            checkpoint.boundaryCondition == params.boundaryCondition &&
-           checkpoint.geometryLengthX == geometry.lengthX &&
-           checkpoint.geometryLengthY == geometry.lengthY &&
-           checkpoint.periodicImageLayers == geometry.imageLayers &&
+           checkpoint.geometryLengthX == lengthX && checkpoint.geometryLengthY == lengthY &&
+           checkpoint.periodicImageLayers == imageLayers &&
            checkpoint.dipoleRemoval == params.dipoleRemoval &&
            (!params.dipoleRemoval ||
             (checkpoint.dipoleRemovalDistance == params.dipoleRemovalDistance &&
@@ -141,8 +131,7 @@ int main(int argc, char **argv) {
         if (restarting)
             restart = loadCheckpoint(params.restartFile);
 
-        const GeometryMetadata geometry = geometryMetadata(params);
-        if (restarting && !checkpointMatches(restart, params, geometry))
+        if (restarting && !checkpointMatches(restart, params))
             throw std::runtime_error(
                 "checkpoint geometry or integrator settings do not match parameters");
 
@@ -284,12 +273,9 @@ int main(int argc, char **argv) {
             synchronizeDeviceState();
             if (backendIsRoot()) {
                 checkCheckpointDestination(outputIndex);
-                writeCheckpoint(paths.checkpoints.string(), vortices, initial, time, dt, nextOutput,
-                                acceptedSteps, outputIndex, eventIndex, params.coreRadius,
-                                params.integrator, params.boundaryCondition, geometry.lengthX,
-                                geometry.lengthY, geometry.imageLayers, params.dipoleRemoval,
-                                params.dipoleRemovalDistance, params.dipoleReinjection,
-                                dipoles.state(), segmentReference, schedule, false);
+                writeCheckpoint(paths.checkpoints, vortices, initial, params, segmentReference,
+                                dipoles.state(), schedule,
+                                {time, dt, nextOutput, acceptedSteps, outputIndex, eventIndex});
             }
         };
 
@@ -303,6 +289,24 @@ int main(int argc, char **argv) {
             writeRunProvenance(params, parameterFile, backendName(), backendRuntimeDetails(), time,
                                eventIndex, restarting);
 
+        const auto takeStep = [&](double stepSize) {
+            StepResult result{stepSize, dt, 0.0, 0};
+            if (deviceStepping) {
+                if (params.integrator == IntegratorKind::rk4)
+                    kernel->deviceRk4Step(stepSize);
+                else
+                    result = kernel->deviceDopri5Step(
+                        stepSize, params.absoluteTolerance, params.relativeTolerance,
+                        params.minimumTimeStep, params.maximumTimeStep);
+                hostStateCurrent = false;
+            } else if (params.integrator == IntegratorKind::rk4) {
+                integrator.rk4Step(vortices, stepSize, *kernel);
+            } else {
+                result = integrator.dopri5Step(vortices, stepSize, *kernel, params);
+            }
+            return result;
+        };
+
         while (time < params.endTime) {
             // Land on the next event from any output stream, or the final time.
             const double stepSize =
@@ -310,26 +314,9 @@ int main(int argc, char **argv) {
                           schedule.nextDiagnosticsTime - time, schedule.nextCheckpointTime - time});
             if (!(time + stepSize > time))
                 throw std::runtime_error("timestep cannot advance simulation time");
-            double acceptedStep = stepSize;
-
-            if (deviceStepping && params.integrator == IntegratorKind::rk4) {
-                kernel->deviceRk4Step(stepSize);
-                hostStateCurrent = false;
-            } else if (deviceStepping) {
-                const DeviceStepResult result = kernel->deviceDopri5Step(
-                    stepSize, params.absoluteTolerance, params.relativeTolerance,
-                    params.minimumTimeStep, params.maximumTimeStep);
-                acceptedStep = result.acceptedTimeStep;
-                dt = result.suggestedTimeStep;
-                hostStateCurrent = false;
-            } else if (params.integrator == IntegratorKind::rk4) {
-                integrator.rk4Step(vortices, stepSize, *kernel);
-            } else {
-                const StepResult result =
-                    integrator.dopri5Step(vortices, stepSize, *kernel, params);
-                acceptedStep = result.acceptedTimeStep;
-                dt = result.suggestedTimeStep;
-            }
+            const StepResult result = takeStep(stepSize);
+            const double acceptedStep = result.acceptedTimeStep;
+            dt = result.suggestedTimeStep;
 
             if (!std::isfinite(acceptedStep) || !(time + acceptedStep > time))
                 throw std::runtime_error("accepted timestep cannot advance simulation time");

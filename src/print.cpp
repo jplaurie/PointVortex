@@ -4,17 +4,26 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
-TrajectoryWriter::TrajectoryWriter(const std::string &filename, bool overwrite) {
+
+namespace {
+std::ofstream openOutput(const std::string &filename, bool overwrite, const char *description) {
     if (!overwrite && std::filesystem::exists(filename))
-        throw std::runtime_error("refusing to overwrite output file: " + filename);
+        throw std::runtime_error("refusing to overwrite " + std::string(description) + ": " +
+                                 filename);
     const auto parent = std::filesystem::path(filename).parent_path();
     if (!parent.empty())
         std::filesystem::create_directories(parent);
-    output_.open(filename, std::ios::trunc);
-    if (!output_)
-        throw std::runtime_error("cannot open output file: " + filename);
+    std::ofstream output(filename, std::ios::trunc);
+    if (!output)
+        throw std::runtime_error("cannot open " + std::string(description) + ": " + filename);
+    output << std::setprecision(17);
+    return output;
+}
+} // namespace
+
+TrajectoryWriter::TrajectoryWriter(const std::string &filename, bool overwrite)
+    : output_(openOutput(filename, overwrite, "output file")) {
     output_ << "time,frame,index,x,y,circulation,u,v\n";
-    output_ << std::setprecision(17);
     output_.flush();
 }
 void TrajectoryWriter::write(double time, std::size_t frame, const VortexSystem &vortices,
@@ -31,15 +40,7 @@ void TrajectoryWriter::write(double time, std::size_t frame, const VortexSystem 
 }
 DiagnosticsWriter::DiagnosticsWriter(const std::string &filename, const Invariants &initial,
                                      bool overwrite)
-    : initial_(initial) {
-    if (!overwrite && std::filesystem::exists(filename))
-        throw std::runtime_error("refusing to overwrite diagnostics file: " + filename);
-    const auto parent = std::filesystem::path(filename).parent_path();
-    if (!parent.empty())
-        std::filesystem::create_directories(parent);
-    output_.open(filename, std::ios::trunc);
-    if (!output_)
-        throw std::runtime_error("cannot open diagnostics file: " + filename);
+    : output_(openOutput(filename, overwrite, "diagnostics file")), initial_(initial) {
     output_
         << "time,frame,circulation,linear_impulse_x,linear_impulse_y,angular_impulse,hamiltonian,"
            "delta_circulation,delta_linear_impulse_x,delta_linear_impulse_y,"
@@ -47,7 +48,6 @@ DiagnosticsWriter::DiagnosticsWriter(const std::string &filename, const Invarian
            "segment_delta_linear_impulse_x,segment_delta_linear_impulse_y,"
            "segment_delta_angular_impulse,segment_delta_hamiltonian,removed_pairs,"
            "reinjected_pairs\n";
-    output_ << std::setprecision(17);
     output_.flush();
 }
 void DiagnosticsWriter::write(double time, std::size_t frame, const Invariants &value,
@@ -71,16 +71,6 @@ void DiagnosticsWriter::write(double time, std::size_t frame, const Invariants &
         throw std::runtime_error("failed while writing diagnostics output");
 }
 namespace {
-const char *integratorName(IntegratorKind value) {
-    return value == IntegratorKind::rk4 ? "rk4" : "dopri5";
-}
-const char *reinjectionName(ReinjectionMode value) {
-    if (value == ReinjectionMode::independent)
-        return "independent";
-    if (value == ReinjectionMode::paired)
-        return "paired";
-    return "none";
-}
 void writeRecord(const std::filesystem::path &path, const SimParams &params,
                  const std::string &parameterFile, const std::string &backend,
                  const std::string &runtimeDetails, double startTime, std::size_t startFrame,
@@ -109,7 +99,7 @@ void writeRecord(const std::filesystem::path &path, const SimParams &params,
            << "outputTime " << params.outputTime << '\n'
            << "diagnosticsTime " << params.diagnosticsInterval() << '\n'
            << "checkpointTime " << params.checkpointInterval() << '\n'
-           << "integrator " << integratorName(params.integrator) << '\n'
+           << "integrator " << toString(params.integrator) << '\n'
            << "coreRadius " << params.coreRadius << '\n'
            << "numThreads " << params.numThreads << '\n'
            << "boundaryCondition " << params.boundaryCondition << '\n'
@@ -120,7 +110,7 @@ void writeRecord(const std::filesystem::path &path, const SimParams &params,
            << "randomSeed " << params.randomSeed << '\n'
            << "dipoleRemoval " << params.dipoleRemoval << '\n'
            << "dipoleRemovalDistance " << params.dipoleRemovalDistance << '\n'
-           << "dipoleReinjection " << reinjectionName(params.dipoleReinjection) << '\n'
+           << "dipoleReinjection " << toString(params.dipoleReinjection) << '\n'
            << "initialConditionFile " << std::quoted(absolutePath(params.initialConditionFile))
            << '\n'
            << "trajectory_file " << std::quoted(absolutePath(paths.trajectory.string())) << '\n'

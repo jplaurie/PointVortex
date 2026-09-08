@@ -28,6 +28,25 @@ Invariants computeMoments(const VortexSystem &vortices) {
 
 } // namespace
 
+void validatePeriodicCirculation(const std::vector<double> &circulation) {
+    double total = 0.0, absoluteTotal = 0.0;
+    for (double gamma : circulation) {
+        total += gamma;
+        absoluteTotal += std::abs(gamma);
+    }
+    if (std::abs(total) > 1e-12 * std::max(1.0, absoluteTotal))
+        throw std::invalid_argument("periodic box requires zero total circulation");
+}
+
+void validateDiskPositions(const std::vector<double> &x, const std::vector<double> &y,
+                           double radiusSquared) {
+    if (x.size() != y.size())
+        throw std::invalid_argument("vortex position arrays have different lengths");
+    for (std::size_t i = 0; i < x.size(); ++i)
+        if (x[i] * x[i] + y[i] * y[i] >= radiusSquared)
+            throw std::invalid_argument("vortex lies on or outside the disk");
+}
+
 InfinitePlaneKernel::InfinitePlaneKernel(double coreRadius)
     : coreRadiusSquared_(coreRadius * coreRadius) {
     if (!(coreRadius >= 0.0) || !std::isfinite(coreRadiusSquared_) ||
@@ -60,7 +79,7 @@ void VelocityKernel::evaluateDeviceState(VelocityField &) const {
 void VelocityKernel::deviceRk4Step(double) const {
     throw std::logic_error("selected backend does not support device-resident integration");
 }
-DeviceStepResult VelocityKernel::deviceDopri5Step(double, double, double, double, double) const {
+StepResult VelocityKernel::deviceDopri5Step(double, double, double, double, double) const {
     throw std::logic_error("selected backend does not support device-resident integration");
 }
 double InfinitePlaneKernel::hamiltonian(const VortexSystem &vortices) const {
@@ -137,10 +156,6 @@ Invariants computeInvariants(const VortexSystem &vortices, double coreRadius) {
 }
 Invariants computeInvariants(const VortexSystem &vortices, const VelocityKernel &kernel) {
     Invariants result = computeMoments(vortices);
-    for (double value :
-         {result.circulation, result.linearImpulseX, result.linearImpulseY, result.angularImpulse})
-        if (!std::isfinite(value))
-            throw std::runtime_error("non-finite vortex moment; check input scales");
     result.hamiltonian = kernel.hamiltonian(vortices);
     if (!std::isfinite(result.hamiltonian))
         throw std::runtime_error("non-finite Hamiltonian; check input scales");
@@ -193,13 +208,7 @@ void PeriodicBoxKernel::evaluateRange(const std::vector<double> &x, const std::v
     validateVortexArrays(x, y, circulation);
     if (begin > end || end > count)
         throw std::out_of_range("invalid target-vortex range");
-    double total = 0.0, absoluteTotal = 0.0;
-    for (double gamma : circulation) {
-        total += gamma;
-        absoluteTotal += std::abs(gamma);
-    }
-    if (std::abs(total) > 1e-12 * std::max(1.0, absoluteTotal))
-        throw std::invalid_argument("periodic box requires zero total circulation");
+    validatePeriodicCirculation(circulation);
     velocity.resize(count);
     const double waveNumber = 2.0 * std::numbers::pi / lengthX_;
     const double scale = 0.5 / lengthX_;
@@ -281,11 +290,10 @@ void DiskKernel::evaluateRange(const std::vector<double> &x, const std::vector<d
     validateVortexArrays(x, y, circulation);
     if (begin > end || end > count)
         throw std::out_of_range("invalid target-vortex range");
-    for (std::size_t i = 0; i < count; ++i)
-        if (x[i] * x[i] + y[i] * y[i] >= radiusSquared_)
-            throw std::invalid_argument("vortex lies on or outside the disk");
+    validateDiskPositions(x, y, radiusSquared_);
     velocity.resize(count);
     constexpr double inverseTwoPi = 0.5 / std::numbers::pi;
+    const double inverseRadius = 1.0 / radius_;
     int singularPair = 0;
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) if (count >= 256) reduction(| : singularPair)
@@ -293,6 +301,7 @@ void DiskKernel::evaluateRange(const std::vector<double> &x, const std::vector<d
     for (std::ptrdiff_t target = static_cast<std::ptrdiff_t>(begin);
          target < static_cast<std::ptrdiff_t>(end); ++target) {
         double u = 0.0, v = 0.0;
+        const double tx = x[target] * inverseRadius, ty = y[target] * inverseRadius;
         for (std::ptrdiff_t source = 0; source < static_cast<std::ptrdiff_t>(count); ++source) {
             if (source != target) {
                 const double dx = x[target] - x[source];
@@ -308,14 +317,14 @@ void DiskKernel::evaluateRange(const std::vector<double> &x, const std::vector<d
             }
             // Evaluate the image contribution without constructing an inverse point.
             // This stays finite when a source is at or extremely close to the center.
-            const double tx = x[target] / radius_, ty = y[target] / radius_;
-            const double sx = x[source] / radius_, sy = y[source] / radius_;
+            const double sx = x[source] * inverseRadius, sy = y[source] * inverseRadius;
             const double a = 1.0 - (tx * sx + ty * sy);
             const double b = ty * sx - tx * sy;
             const double denominator = a * a + b * b;
             const double imageX = -a * sx - b * sy;
             const double imageY = -a * sy + b * sx;
-            const double coefficient = -inverseTwoPi * circulation[source] / radius_ / denominator;
+            const double coefficient =
+                -inverseTwoPi * circulation[source] * inverseRadius / denominator;
             u -= coefficient * imageY;
             v += coefficient * imageX;
         }

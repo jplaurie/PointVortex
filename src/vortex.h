@@ -24,26 +24,29 @@ struct VortexSystem {
         y.resize(n);
         circulation.resize(n);
     }
+    void reserve(std::size_t n) {
+        x.reserve(n);
+        y.reserve(n);
+        circulation.reserve(n);
+    }
+    void pushBack(double xValue, double yValue, double circulationValue) {
+        x.push_back(xValue);
+        y.push_back(yValue);
+        circulation.push_back(circulationValue);
+    }
     void validate() const { validateVortexArrays(x, y, circulation); }
 };
 // Runge--Kutta stage positions do not need a copy of the constant circulations.
-struct PositionField {
+struct VectorField {
     std::vector<double> x;
     std::vector<double> y;
-    explicit PositionField(std::size_t n = 0) : x(n), y(n) {}
+    explicit VectorField(std::size_t n = 0) : x(n), y(n) {}
     [[nodiscard]] std::size_t size() const noexcept { return x.size(); }
     void resize(std::size_t n) {
         x.resize(n);
         y.resize(n);
     }
 };
-struct VelocityField {
-    std::vector<double> x;
-    std::vector<double> y;
-    explicit VelocityField(std::size_t n = 0) : x(n), y(n) {}
-    void resize(std::size_t n) {
-        x.resize(n);
-        y.resize(n);
-    }
-};
+using PositionField = VectorField;
+using VelocityField = VectorField;
 #endif

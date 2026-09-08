@@ -175,8 +175,7 @@ void validateInitialCondition(const VortexSystem &vortices,
 
     double totalCirculation = 0.0;
     for (std::size_t i = 0; i < vortices.size(); ++i) {
-        if (!std::isfinite(vortices.x[i]) || !std::isfinite(vortices.y[i]) ||
-            !std::isfinite(vortices.circulation[i]) || vortices.circulation[i] == 0.0)
+        if (vortices.circulation[i] == 0.0)
             throw std::invalid_argument("initial condition contains an invalid vortex");
         if (options.geometry == InitialGeometry::periodic &&
             (vortices.x[i] < -0.5 * options.boxLength || vortices.x[i] >= 0.5 * options.boxLength ||

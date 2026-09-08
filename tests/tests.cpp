@@ -87,9 +87,8 @@ void checkpointTest() {
     SimParams parameters;
     const DipoleEventState dipoleState = DipoleManager(parameters).state();
     const OutputSchedule schedule{0.1, 0.2, 0.5, 1.4, 1.5};
-    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 9, 0.0,
-                    IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
-                    ReinjectionMode::none, dipoleState, initial, schedule);
+    const CheckpointProgress progress{1.25, 0.0125, 1.3, 42, 7, 9};
+    writeCheckpoint(directory, state, initial, parameters, initial, dipoleState, schedule, progress);
     const auto restored = loadCheckpoint(checkpointPath(directory, 7));
     if (!restored.hasOutputSchedule)
         throw std::runtime_error("checkpoint output schedule missing");
@@ -106,24 +105,22 @@ void checkpointTest() {
          "checkpoint segment invariant");
     if (restored.acceptedSteps != 42 || restored.outputIndex != 7 || restored.eventIndex != 9)
         throw std::runtime_error("checkpoint counters failed");
-    if (restored.boundaryCondition != "infinite" || restored.periodicImageLayers != 8)
+    if (restored.boundaryCondition != "infinite" || restored.periodicImageLayers != 0)
         throw std::runtime_error("checkpoint geometry failed");
     if (restored.dipoleRemoval || restored.dipoleReinjection != ReinjectionMode::none ||
         restored.dipoleState.randomEngineState != dipoleState.randomEngineState)
         throw std::runtime_error("checkpoint dipole state failed");
     bool refusedOverwrite = false;
     try {
-        writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 9, 0.0,
-                        IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
-                        ReinjectionMode::none, dipoleState, initial, schedule);
+        writeCheckpoint(directory, state, initial, parameters, initial, dipoleState, schedule,
+                        progress);
     } catch (const std::runtime_error &) {
         refusedOverwrite = true;
     }
     if (!refusedOverwrite)
         throw std::runtime_error("checkpoint overwrite was not refused");
-    writeCheckpoint(directory, state, initial, 1.25, 0.0125, 1.3, 42, 7, 9, 0.0,
-                    IntegratorKind::dopri5, "infinite", 0.0, 0.0, 8, false, 0.01,
-                    ReinjectionMode::none, dipoleState, initial, schedule, true);
+    writeCheckpoint(directory, state, initial, parameters, initial, dipoleState, schedule, progress,
+                    true);
     std::filesystem::remove_all(directory);
 }
 void geometryTests() {
